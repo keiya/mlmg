@@ -134,15 +134,20 @@ def generate_location_layer(
         return Failure(parsed_result.failure())
     parsed_locs = parsed_result.unwrap()
 
+    # PoC 2026-05-24: relaxed from fatal to warn-only — mirrors the same
+    # change in `layers/character.py`. The cap was killing runs when MPBV
+    # over-proposed (especially same-place angle variants before the
+    # location prompt fix); user-facing impact (run abort) was much worse
+    # than the per-location $0.21 cost the cap was meant to defend.
     if len(parsed_locs) > config.limits.max_locations:
-        return Failure(
-            MangaError(
-                kind=ErrorKind.VALIDATION_FAILED,
-                message=(
-                    f"too many locations: {len(parsed_locs)} > "
-                    f"{config.limits.max_locations}"
-                ),
-            )
+        logger.warning(
+            "location_count_exceeded",
+            count=len(parsed_locs),
+            limit=config.limits.max_locations,
+            message=(
+                "LLM proposed more locations than max_locations limit; "
+                "generating all and continuing"
+            ),
         )
 
     # Preflight: every parsed location must expose `### 視覚的特徴` before any

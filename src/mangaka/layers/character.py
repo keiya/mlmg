@@ -136,15 +136,22 @@ def generate_character_layer(
         return Failure(parsed_result.failure())
     parsed_chars = parsed_result.unwrap()
 
+    # PoC 2026-05-24: relaxed from fatal to warn-only. The previous strict
+    # cap killed the entire run when MPBV proposed more than max characters
+    # (it often inflates with voice/concept/group entities that aren't real
+    # "main" characters — see prompts/05_character.md). The user's concern
+    # was the abort, not the per-char $0.21 cost. The character prompt
+    # itself discourages over-counting; if it slips through, we still
+    # generate all proposed characters and let the run continue.
     if len(parsed_chars) > config.limits.max_main_characters:
-        return Failure(
-            MangaError(
-                kind=ErrorKind.VALIDATION_FAILED,
-                message=(
-                    f"too many characters: {len(parsed_chars)} > "
-                    f"{config.limits.max_main_characters}"
-                ),
-            )
+        logger.warning(
+            "character_count_exceeded",
+            count=len(parsed_chars),
+            limit=config.limits.max_main_characters,
+            message=(
+                "LLM proposed more characters than max_main_characters limit; "
+                "generating all and continuing"
+            ),
         )
 
     # Preflight: every parsed character must expose a `### 外見` subsection

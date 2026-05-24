@@ -308,8 +308,13 @@ def test_character_layer_requires_stylist(tmp_path: Path) -> None:
     assert result.failure().kind == ErrorKind.MISSING_PREREQUISITE
 
 
-def test_character_layer_too_many_characters_rejected(tmp_path: Path) -> None:
-    """Exceeding `limits.max_main_characters` should fail VALIDATION_FAILED."""
+def test_character_layer_over_limit_warns_but_continues(tmp_path: Path) -> None:
+    """PoC 2026-05-24: relaxed from fatal to warn-only. MPBV often inflates
+    the cast with voice/concept entities, and the run-killing strict cap
+    hurt more than it helped (user-facing impact > the $0.21 per-char cost
+    the cap was meant to defend). Now the layer logs a warning and generates
+    all proposed characters.
+    """
     state = _with_stylist(_seed_state(), tmp_path)
     too_many = "\n\n".join(
         f"## c{i} (c{i})\n### 外見\n描写{i}" for i in range(20)
@@ -319,8 +324,9 @@ def test_character_layer_too_many_characters_rejected(tmp_path: Path) -> None:
         state, llm, FakeImageClient(), make_test_config(),
         PromptLoader(prompts_dir()), run_dir=tmp_path,
     )
-    assert isinstance(result, Failure)
-    assert result.failure().kind == ErrorKind.VALIDATION_FAILED
+    assert isinstance(result, Success)
+    new_state = result.unwrap()
+    assert len(new_state.characters) == 20
 
 
 def test_character_layer_preflights_visual_sections_before_rendering(
