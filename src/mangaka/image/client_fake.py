@@ -36,6 +36,12 @@ class FakeImageClient:
 
     By default every call returns `Success(_TINY_PNG)`. Pre-load `results` to
     return mixed Success / Failure outcomes in sequence.
+
+    Thread safety: `results.pop(0)` and `calls.append` are not locked. When
+    using this fake under `image_workers > 1`, do not pre-seed `results` with
+    an order-dependent sequence — the mapping of outcomes to jobs becomes
+    non-deterministic. Either use `default_bytes` (uniform Success) or pin
+    such tests to `image_workers=1`.
     """
 
     default_bytes: bytes = _TINY_PNG

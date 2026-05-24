@@ -103,6 +103,35 @@ def test_max_refs_per_page_below_2_rejected(tmp_path: Path) -> None:
     assert err.kind == ErrorKind.CONFIG_ERROR
 
 
+def test_include_prev_page_ref_with_parallel_workers_rejected(tmp_path: Path) -> None:
+    """plan §3.6 / commit (d): parallel page_render pre-builds refs before
+    any worker runs, so include_prev_page_ref would silently lose the
+    prev-page image. Loud-fail at config load instead."""
+    body = (
+        _DEFAULT_LAYERS_TOML
+        + "\n[image]\ninclude_prev_page_ref = true\n"
+        + "\n[concurrency]\nimage_workers = 4\n"
+    )
+    p = _write_config(tmp_path, body)
+    result = load_config(p)
+    assert isinstance(result, Failure)
+    err = result.failure()
+    assert err.kind == ErrorKind.CONFIG_ERROR
+    assert "include_prev_page_ref" in err.message
+
+
+def test_include_prev_page_ref_with_workers_1_accepted(tmp_path: Path) -> None:
+    """Drop to image_workers=1 if you genuinely need prev_page refs."""
+    body = (
+        _DEFAULT_LAYERS_TOML
+        + "\n[image]\ninclude_prev_page_ref = true\n"
+        + "\n[concurrency]\nimage_workers = 1\n"
+    )
+    p = _write_config(tmp_path, body)
+    result = load_config(p)
+    assert isinstance(result, Success)
+
+
 def test_warn_above_hard_limit_rejected(tmp_path: Path) -> None:
     body = _DEFAULT_LAYERS_TOML + "\n[image]\nmax_prompt_chars = 10000\nwarn_prompt_chars = 20000\n"
     p = _write_config(tmp_path, body)

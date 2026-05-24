@@ -209,6 +209,23 @@ class MangakaConfig(BaseModel):
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
     layers: LayersConfig
 
+    @model_validator(mode="after")
+    def _check_parallel_vs_prev_page_ref(self) -> MangakaConfig:
+        # The parallel page_render layer pre-builds every job's refs
+        # BEFORE any worker runs, so page N's prompt cannot see page
+        # N-1's freshly-rendered image. include_prev_page_ref=True would
+        # silently degrade to "no prev ref" — better to loud-fail at
+        # config load. Drop to image_workers=1 (still uses the executor
+        # but serial) if you genuinely need prev_page refs.
+        if self.image.include_prev_page_ref and self.concurrency.image_workers > 1:
+            raise ValueError(
+                "image.include_prev_page_ref=True is incompatible with "
+                "concurrency.image_workers > 1: parallel page_render cannot "
+                "feed page N-1's freshly-rendered image to page N. Either "
+                "set image_workers=1 or include_prev_page_ref=false."
+            )
+        return self
+
 
 def load_config(path: Path) -> Result[MangakaConfig, MangaError]:
     """Read a TOML file and validate it into a `MangakaConfig`.
