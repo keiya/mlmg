@@ -45,13 +45,44 @@ _REMAINING_LAYERS = [
 
 
 def _state_has(state: MangaState, layer_key: str) -> bool:
+    """Decide whether `layer_key` is fully done in `state`.
+
+    Character / location layers can now leave a *partial* checkpoint
+    (cached markdown + a strict prefix of completed entries) if some
+    sheet render failed mid-batch. "Fully done" therefore needs:
+    cached markdown is set AND every parsed entity from that markdown
+    has a Character / Location entry in state. Anything less → re-enter
+    the layer so its own resume logic finishes the remaining work.
+    """
     match layer_key:
         case "stylist":
             return state.stylist is not None
         case "character":
-            return len(state.characters) > 0
+            if not state.character_markdown:
+                return False
+            from mangaka.parse.character import parse_character_markdown
+            parsed = parse_character_markdown(state.character_markdown)
+            if not hasattr(parsed, "unwrap"):  # parse failed
+                return False
+            try:
+                parsed_ids = {p.id for p in parsed.unwrap()}
+            except Exception:
+                return False
+            existing_ids = {c.id for c in state.characters}
+            return parsed_ids.issubset(existing_ids)
         case "location":
-            return len(state.locations) > 0
+            if not state.location_markdown:
+                return False
+            from mangaka.parse.location import parse_location_markdown
+            parsed = parse_location_markdown(state.location_markdown)
+            if not hasattr(parsed, "unwrap"):
+                return False
+            try:
+                parsed_ids = {p.id for p in parsed.unwrap()}
+            except Exception:
+                return False
+            existing_ids = {loc.id for loc in state.locations}
+            return parsed_ids.issubset(existing_ids)
         case "page_plan":
             return state.page_plan is not None
         case "page_render":

@@ -12,7 +12,7 @@ from pathlib import Path
 from _helpers import make_test_config, prompts_dir
 from returns.result import Failure, Success
 
-from mangaka.domain import MPBV, Backstories, MangaState, MasterPlot, Stylist
+from mangaka.domain import MPBV, Backstories, Character, Location, MangaState, MasterPlot, Stylist
 from mangaka.errors import ErrorKind
 from mangaka.image.client_fake import FakeImageClient
 from mangaka.layers.character import generate_character_layer
@@ -284,6 +284,7 @@ def test_character_layer_generates_per_character_sheet(tmp_path: Path) -> None:
     )
     assert isinstance(result, Success)
     s = result.unwrap()
+    # Canonical (parsed_chars) order, not completion order.
     assert [c.id for c in s.characters] == ["alice", "bob"]
     assert s.characters[0].sheet_paths[0] == tmp_path / "assets" / "characters" / "alice.png"
     assert s.characters[1].sheet_paths[0] == tmp_path / "assets" / "characters" / "bob.png"
@@ -294,6 +295,43 @@ def test_character_layer_generates_per_character_sheet(tmp_path: Path) -> None:
         assert call.refs == (state.stylist.style_ref_path,)  # type: ignore[union-attr]
     # plan §3.8: raw LLM markdown is cached in state for resume.
     assert s.character_markdown == _CHARACTER_RESPONSE
+
+
+def test_character_layer_resumes_from_cached_markdown(tmp_path: Path) -> None:
+    """plan §3.8: on re-entry with cached markdown, LLM is NOT called
+    again. Re-parse the cached text, skip already-done characters,
+    render only the missing ones."""
+    state = _with_stylist(_seed_state(), tmp_path)
+    # Simulate prior partial run: markdown cached, alice done, bob missing.
+    alice_sheet = tmp_path / "assets" / "characters" / "alice.png"
+    alice_sheet.parent.mkdir(parents=True, exist_ok=True)
+    alice_sheet.write_bytes(b"alice_from_prior_run")
+    state = replace(
+        state,
+        character_markdown=_CHARACTER_RESPONSE,
+        characters=[
+            Character(
+                id="alice", name="アリス", description="d",
+                sheet_paths=[alice_sheet],
+            )
+        ],
+    )
+    # FakeLLMClient with no default would error if called — proves we don't.
+    llm = FakeLLMClient(default_response="DO_NOT_CALL_ME")
+    img = FakeImageClient(default_bytes=b"bob_fresh")
+    result = generate_character_layer(
+        state, llm, img, make_test_config(), PromptLoader(prompts_dir()),
+        run_dir=tmp_path,
+    )
+    assert isinstance(result, Success)
+    s = result.unwrap()
+    # LLM was NOT called (cached markdown reused).
+    assert len(llm.calls) == 0
+    # Only bob hit the image API (alice was already done).
+    assert len(img.calls) == 1
+    # State has both characters, alice's bytes untouched.
+    assert {c.id for c in s.characters} == {"alice", "bob"}
+    assert alice_sheet.read_bytes() == b"alice_from_prior_run"
 
 
 def test_character_layer_requires_stylist(tmp_path: Path) -> None:
@@ -397,6 +435,37 @@ def test_location_layer_generates_sheet(tmp_path: Path) -> None:
     assert img.calls[0].method == "edit"
     # plan §3.8: raw LLM markdown is cached in state for resume.
     assert s.location_markdown == _LOCATION_RESPONSE
+
+
+def test_location_layer_resumes_from_cached_markdown(tmp_path: Path) -> None:
+    """Symmetric to test_character_layer_resumes_from_cached_markdown."""
+    state = _with_stylist(_seed_state(), tmp_path)
+    loc_sheet = tmp_path / "assets" / "locations" / "rooftop_morning.png"
+    loc_sheet.parent.mkdir(parents=True, exist_ok=True)
+    loc_sheet.write_bytes(b"loc_from_prior_run")
+    state = replace(
+        state,
+        location_markdown=_LOCATION_RESPONSE,
+        locations=[
+            Location(
+                id="rooftop_morning", name="屋上 朝",
+                description="d", sheet_path=loc_sheet,
+            )
+        ],
+    )
+    llm = FakeLLMClient(default_response="DO_NOT_CALL_ME")
+    img = FakeImageClient()
+    result = generate_location_layer(
+        state, llm, img, make_test_config(), PromptLoader(prompts_dir()),
+        run_dir=tmp_path,
+    )
+    assert isinstance(result, Success)
+    s = result.unwrap()
+    assert len(llm.calls) == 0
+    # Already-done location → no image work.
+    assert len(img.calls) == 0
+    assert len(s.locations) == 1
+    assert loc_sheet.read_bytes() == b"loc_from_prior_run"
 
 
 def test_location_layer_preflights_visual_sections_before_rendering(

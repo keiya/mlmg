@@ -374,6 +374,15 @@ runs/{name}/
 - リテイクしたい場合は、対応する `state_*.json` を削除して再生成する。既存ファイルが残っている場合は次の空き versioned filename に保存
 - 旧版は run 内に残す。不要になった旧版の pruning は v2 候補
 
+#### `save_bytes_strict` vs `save_bytes_versioned`
+
+`src/mangaka/image/assets.py` は 2 つの save helper を出す:
+
+- `save_bytes_strict(target, data)` — atomic `O_CREAT|O_EXCL`。target が既にあれば `IO_ERROR/FILE_EXISTS` で Failure。canonical pipeline (page_render, character, location) はこちらを使う。これにより、state JSON が「未レンダリング」と言っているのに disk に PNG がある（孤児）状態を **silent overwrite ではなく loud-fail で表面化**できる。並列 worker が同一 path に write レースしても syscall レベルで 1 つだけ成功する
+- `save_bytes_versioned(target, data)` — 既存 file があれば `_vNNN` で逃げる。`--inject-*` CLI 専用。意図的な差し替えなので versioning が正しい挙動
+
+`save_bytes` シンボルは互換のため `save_bytes_versioned` のエイリアスとして残しているが、新規コードは目的を明示する 2 つの名前のどちらかを使う。
+
 ### `state_final.json` は派生ファイル
 
 `state_final.json` は pipeline 完了時に作られる**派生スナップショット**で、canonical artifact ではない:
@@ -593,6 +602,57 @@ LLM コスト除く画像のみの大まかな目安:
 リテイク分で 1.5〜2 倍は見ておく。継続性・キャラ再現で参照画像つき edit 比率が高くなると上振れする。
 
 `config.toml` の `limits.max_image_calls` 等で安全ストッパを置く想定（v1 未実装、v2 で追加）。
+
+---
+
+## 並列実行モデル
+
+image 生成レイヤー (`page_render`, `character`, `location`) は `src/mangaka/image/parallel.py` の `run_image_jobs` を介して `ThreadPoolExecutor` で並列実行する。設計と段取りは `docs/plans/parallel_image_generation.md` が一次ソース。要点だけ:
+
+### ImageJob と executor の不変条件
+
+- 各 `ImageJob` は self-contained (prompt + refs → bytes → 決定的な `output_path`)
+- worker は `MangaState` を触らない。state 反映は main thread の `on_complete` callback で逐次
+- `on_complete` は **completion 順** で 1 つずつ呼ばれる。これにより state mutation はロック不要
+- バッチ内の `output_path` は caller が distinct に保つ契約 (page_number / character.id / location.id は構造的に unique)。`save_bytes_strict` が atomic なので衝突しても overwrite ではなく loud-fail
+
+### Drain protocol (`fail_fast=True` 時)
+
+`ThreadPoolExecutor.cancel()` は実行中の future には効かないので、ナイーブに `break` すると in-flight worker が PNG を書いた直後に on_complete を skip して state-vs-disk 不整合になる。`run_image_jobs` は first failure 観測後も `as_completed` の iteration を継続し、各 in-flight worker の success 結果を on_complete で commit してから error を返す。**「PNG が disk に landed なら state は必ず追従している」**を保つ。
+
+worker が exception を raise した場合 (= programmer bug)、および `on_complete` が exception を raise した場合 (= caller bug) も同じ drain path に巻き込む。`Exception` のみ catch する (`KeyboardInterrupt` / `SystemExit` は control flow として propagate する)。
+
+### Resume と LLM-output caching (plan §3.8)
+
+character / location レイヤーは LLM が stochastic なので、partial run 後の re-entry で text phase を再実行すると id が drift する → prefix-skip resume が壊れる。対策:
+
+1. text phase 実行直後、image phase より**前に** `state.character_markdown` / `state.location_markdown` に raw markdown を入れて self-checkpoint
+2. 再 entry 時は cached markdown を re-parse → 同じ `parsed_chars` / `parsed_locs`
+3. `state.characters` / `state.locations` の既存 id を `already_done` set にして job 構築時に filter
+4. on_complete は canonical (parsed) 順で append + sort (completion 順非依存)
+
+page_render は LLM を使わないので caching 不要、image_path で skip するだけで idempotent。
+
+### Worker 数と OpenAI Tier 5
+
+`config.concurrency.image_workers` (default 16)。Tier 5 IPM=250 に対して `N × 60 / latency_sec` が定常 IPM。`latency≈50s` で N=16 は 19.2 IPM ≈ 7.7% 使用率、retry storm と並行 run のために 5x 以上の headroom。上限は soft 256 (アーキ的に >>32 は遊ぶ worker が出るだけ)。
+
+### Retry jitter
+
+`RetryHandler.calculate_delay` は ±25% uniform multiplicative jitter を持つ。N workers が同時 429 を観測したときに retry wave をばらつかせる。LLM 経路も jitter 通すが initial_delay 1s で ±0.25s なので debug 影響は無視できる。
+
+### `include_prev_page_ref` との互換性
+
+`image.include_prev_page_ref=True` (= ページ N の prompt に N-1 の rendered image を入れる) は並列前提とは構造的に不整合 (job batch を build する時点で N-1 はまだ rendered されていない)。`MangakaConfig` validator が `include_prev_page_ref=True && image_workers>1` を **load 時に拒否**する。連続性参照が必要なら `image_workers=1` に落とす。
+
+### 撤退オプション (debug 用)
+
+`image_workers=1` で全 image 層が serial 退行する。drain protocol / strict save / caching は同じコードで動く ので、並列固有のバグを疑った時は workers=1 で再現確認すれば良い。
+
+### 関連設計判断
+
+- **PageBeat 削除** (2026-05-24, `71f9119`): 並列化以前の話だが、page_render の入力を `PagePlan.page_outline.summary` 直接に変えたので「N-1 を見ないと N が描けない」依存が消えた → 並列化が embarrassingly parallel になった。`設計の進化` 節参照
+- **Layer 単位の並列 (Character ∥ Location)**: 同じ MPBV + Stylist を消費し disjoint な state slice を produce するので fork-join できる。が、本セクションの per-sheet 並列で実用的速度は出ているので deferred。再検討条件は `docs/plans/parallel_image_generation.md` §9
 
 ---
 
