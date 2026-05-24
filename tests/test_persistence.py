@@ -171,3 +171,37 @@ def test_round_trip_with_image_layers_and_page_plan(tmp_path: Path) -> None:
     assert rt.page_plan.total_pages == 2
     assert rt.page_plan.arc[0].phase == "起"
     assert rt.page_plan.page_outline[1].character_ids == ["alice"]
+
+
+def test_round_trip_llm_cache_fields(tmp_path: Path) -> None:
+    """plan §3.8: raw character / location markdown round-trips so resume
+    can skip the stochastic LLM call. Unicode preserved (Japanese)."""
+    _ = tmp_path
+    state = _seed_state()
+    state = replace(
+        state,
+        character_markdown="## キャラA\n外見\n…",
+        location_markdown="## 場所X\n視覚的特徴\n…",
+    )
+    rt_result = from_json(to_json(state))
+    assert isinstance(rt_result, Success)
+    rt = rt_result.unwrap()
+    assert rt.character_markdown == "## キャラA\n外見\n…"
+    assert rt.location_markdown == "## 場所X\n視覚的特徴\n…"
+
+
+def test_pre_parallel_state_json_loads_with_default_none() -> None:
+    """Old state files (no character_markdown / location_markdown keys)
+    must deserialize cleanly with the new fields defaulting to None."""
+    # A minimal pre-parallel state JSON (no new keys present).
+    old_json = (
+        '{"seed_input": "s", "run_name": "r",'
+        ' "characters": [{"id": "alice", "name": "A",'
+        ' "description": "d", "sheet_paths": ["/tmp/a.png"]}]}'
+    )
+    rt_result = from_json(old_json)
+    assert isinstance(rt_result, Success)
+    rt = rt_result.unwrap()
+    assert rt.character_markdown is None
+    assert rt.location_markdown is None
+    assert rt.characters[0].id == "alice"

@@ -16,6 +16,7 @@ from mangaka.llm.prompts import PromptLoader
 from mangaka.logging import get_logger
 from mangaka.parse.character import ParsedCharacter, parse_character_markdown
 from mangaka.parse.sections import extract_subsection
+from mangaka.persistence import save_state, state_path_for
 from mangaka.result import Failure, Result, Success
 
 logger = get_logger(__name__)
@@ -107,12 +108,15 @@ def generate_character_layer(
             )
         )
 
+    # Bind locally so pyright keeps the non-None narrowing across the
+    # later `replace(state, ...)` rebinding.
+    stylist = state.stylist
     layer = config.layers.character
 
     text_prompt_result = prompt_loader.render(
         TEXT_TEMPLATE,
         mpbv=state.mpbv.raw_markdown,
-        stylist=state.stylist.raw_markdown,
+        stylist=stylist.raw_markdown,
         max_main_characters=config.limits.max_main_characters,
     )
     if isinstance(text_prompt_result, Failure):
@@ -131,7 +135,19 @@ def generate_character_layer(
         logger.error("layer_failed", layer="character", phase="text", error=text_result.failure().message)
         return Failure(text_result.failure())
 
-    parsed_result = parse_character_markdown(text_result.unwrap())
+    raw_markdown = text_result.unwrap()
+    # Cache the raw LLM output AND persist it before any image call. The
+    # character layer is stochastic; if a sheet render fails partway
+    # through, resume must reuse this exact markdown (not re-call the
+    # LLM) so character ids stay stable. The orchestrator only saves on
+    # layer Success, so we self-checkpoint here to keep the invariant
+    # even when the layer eventually returns Failure. plan §3.8.
+    state = replace(state, character_markdown=raw_markdown)
+    cache_save = save_state(state, state_path_for(run_dir, "character"))
+    if isinstance(cache_save, Failure):
+        return Failure(cache_save.failure())
+
+    parsed_result = parse_character_markdown(raw_markdown)
     if isinstance(parsed_result, Failure):
         return Failure(parsed_result.failure())
     parsed_chars = parsed_result.unwrap()
@@ -172,8 +188,8 @@ def generate_character_layer(
     for parsed in parsed_chars:
         sheet_result = _render_sheet(
             parsed,
-            state.stylist.style_ref_path,
-            state.stylist.raw_markdown,
+            stylist.style_ref_path,
+            stylist.raw_markdown,
             prompt_loader,
             img,
             config,

@@ -16,6 +16,7 @@ from mangaka.llm.prompts import PromptLoader
 from mangaka.logging import get_logger
 from mangaka.parse.location import ParsedLocation, parse_location_markdown
 from mangaka.parse.sections import extract_subsection
+from mangaka.persistence import save_state, state_path_for
 from mangaka.result import Failure, Result, Success
 
 logger = get_logger(__name__)
@@ -105,12 +106,16 @@ def generate_location_layer(
             )
         )
 
+    # Bind locally so pyright keeps the non-None narrowing across the
+    # later `replace(state, ...)` rebinding (which widens state.stylist
+    # back to Optional in the type-checker's view).
+    stylist = state.stylist
     layer = config.layers.location
 
     text_prompt_result = prompt_loader.render(
         TEXT_TEMPLATE,
         mpbv=state.mpbv.raw_markdown,
-        stylist=state.stylist.raw_markdown,
+        stylist=stylist.raw_markdown,
         max_locations=config.limits.max_locations,
     )
     if isinstance(text_prompt_result, Failure):
@@ -129,7 +134,16 @@ def generate_location_layer(
         logger.error("layer_failed", layer="location", phase="text", error=text_result.failure().message)
         return Failure(text_result.failure())
 
-    parsed_result = parse_location_markdown(text_result.unwrap())
+    raw_markdown = text_result.unwrap()
+    # Cache + persist raw LLM output before any image call so resume can
+    # skip the stochastic LLM phase even if the layer returns Failure
+    # later. plan §3.8.
+    state = replace(state, location_markdown=raw_markdown)
+    cache_save = save_state(state, state_path_for(run_dir, "location"))
+    if isinstance(cache_save, Failure):
+        return Failure(cache_save.failure())
+
+    parsed_result = parse_location_markdown(raw_markdown)
     if isinstance(parsed_result, Failure):
         return Failure(parsed_result.failure())
     parsed_locs = parsed_result.unwrap()
@@ -167,8 +181,8 @@ def generate_location_layer(
     for parsed in parsed_locs:
         sheet_result = _render_sheet(
             parsed,
-            state.stylist.style_ref_path,
-            state.stylist.raw_markdown,
+            stylist.style_ref_path,
+            stylist.raw_markdown,
             prompt_loader,
             img,
             config,

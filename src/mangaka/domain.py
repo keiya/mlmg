@@ -163,6 +163,15 @@ class MangaState:
     page_plan: PagePlan | None = None
     pages: list[Page] = field(default_factory=list[Page])
 
+    # Raw LLM markdown captured BEFORE any image call. Resume entering
+    # character / location layer reuses this cached text instead of re-
+    # calling the LLM, so per-character / per-location `id`s stay stable
+    # across resumes (the LLM is stochastic). Populated by the text phase
+    # of each layer; consumed on resume. See docs/plans/
+    # parallel_image_generation.md §3.8.
+    character_markdown: str | None = None
+    location_markdown: str | None = None
+
     def __post_init__(self) -> None:
         # `dataclasses.replace` reuses `__dict__` slots from the source for
         # field values but calls `__init__` / `__post_init__` on the new

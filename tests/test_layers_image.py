@@ -292,6 +292,8 @@ def test_character_layer_generates_per_character_sheet(tmp_path: Path) -> None:
     for call in img.calls:
         assert call.method == "edit"
         assert call.refs == (state.stylist.style_ref_path,)  # type: ignore[union-attr]
+    # plan §3.8: raw LLM markdown is cached in state for resume.
+    assert s.character_markdown == _CHARACTER_RESPONSE
 
 
 def test_character_layer_requires_stylist(tmp_path: Path) -> None:
@@ -363,6 +365,16 @@ def test_character_layer_preflights_visual_sections_before_rendering(
     assert result.failure().kind == ErrorKind.PARSE_ERROR
     assert len(img.calls) == 0  # NO paid image work before parse validates
     assert not (tmp_path / "assets" / "characters" / "alice.png").exists()
+    # plan §3.8 invariant: even though the layer failed, the raw LLM
+    # markdown was persisted to disk BEFORE the preflight ran, so resume
+    # can reuse it without paying for another LLM call.
+    state_file = tmp_path / "state_05_character.json"
+    assert state_file.exists()
+    from mangaka.persistence import load_state
+
+    loaded = load_state(state_file)
+    assert isinstance(loaded, Success)
+    assert loaded.unwrap().character_markdown == md
 
 
 # ---------------------------------------------------------------------------
@@ -383,6 +395,8 @@ def test_location_layer_generates_sheet(tmp_path: Path) -> None:
     assert s.locations[0].sheet_path == tmp_path / "assets" / "locations" / "rooftop_morning.png"
     assert len(img.calls) == 1
     assert img.calls[0].method == "edit"
+    # plan §3.8: raw LLM markdown is cached in state for resume.
+    assert s.location_markdown == _LOCATION_RESPONSE
 
 
 def test_location_layer_preflights_visual_sections_before_rendering(

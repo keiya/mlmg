@@ -77,6 +77,9 @@ def _serialize(state: MangaState) -> dict[str, Any]:
             "style_ref_path": str(state.stylist.style_ref_path),
         }
 
+    if state.character_markdown is not None:
+        data["character_markdown"] = state.character_markdown
+
     if state.characters:
         data["characters"] = [
             {
@@ -87,6 +90,9 @@ def _serialize(state: MangaState) -> dict[str, Any]:
             }
             for c in state.characters
         ]
+
+    if state.location_markdown is not None:
+        data["location_markdown"] = state.location_markdown
 
     if state.locations:
         data["locations"] = [
@@ -166,6 +172,11 @@ def _deserialize(data: dict[str, Any]) -> MangaState:
             ),
         )
 
+    if "character_markdown" in data:
+        state = replace(
+            state, character_markdown=cast("str", data["character_markdown"])
+        )
+
     if "characters" in data:
         chars_data = cast("list[dict[str, Any]]", data["characters"])
         characters = [
@@ -178,6 +189,11 @@ def _deserialize(data: dict[str, Any]) -> MangaState:
             for c in chars_data
         ]
         state = replace(state, characters=characters)
+
+    if "location_markdown" in data:
+        state = replace(
+            state, location_markdown=cast("str", data["location_markdown"])
+        )
 
     if "locations" in data:
         locs_data = cast("list[dict[str, Any]]", data["locations"])
