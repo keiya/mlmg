@@ -154,6 +154,31 @@ def build_page_prompt(
     parts.append("右上から左下の読み順、日本の漫画スタイル。")
     parts.append("")
 
+    # Story-level context: without this, gpt-image-2 composes each page in
+    # isolation. PoC 2026-05-24 showed the model couldn't convey arc-level
+    # meaning (e.g. "this is the redo of page 1") because it only saw the
+    # current page's mood + continuity_note. Pulling MPBV §1 (logline /
+    # theme / 異常性) and §2 (world rules) plus arc position gives the model
+    # the same whole-story context a manga assistant would have in mind.
+    # `extract_sections` takes first-match per section number, so we get
+    # the master-plot §1/§2 (not the worldbuilding ones that share numbers).
+    if state.mpbv is not None and state.page_plan is not None:
+        overview = extract_sections(state.mpbv.raw_markdown, [1, 2])
+        if overview.strip():
+            parts.append("【物語の全貌】")
+            parts.append(overview)
+            parts.append("")
+        arc_label = ""
+        for a in state.page_plan.arc:
+            if a.start_page <= page_beat.page_number <= a.end_page:
+                arc_label = f"phase「{a.phase}」({a.summary})"
+                break
+        parts.append(
+            f"【このページの位置】全 {state.page_plan.total_pages} ページ中、"
+            f"{page_beat.page_number} ページ目。{arc_label}"
+        )
+        parts.append("")
+
     parts.append("【場所】")
     parts.append(
         extract_visual_summary(
