@@ -1,6 +1,11 @@
 """Image generation client layer (gpt-image-2 + Fake) + asset helpers."""
 
-from mangaka.image.assets import next_available_path, save_bytes
+from mangaka.image.assets import (
+    next_available_path,
+    save_bytes,
+    save_bytes_strict,
+    save_bytes_versioned,
+)
 from mangaka.image.client import ImageClient
 from mangaka.image.client_fake import FakeImageClient
 from mangaka.image.prompts import build_page_prompt, extract_visual_summary
@@ -18,4 +23,6 @@ __all__ = [
     "extract_visual_summary",
     "next_available_path",
     "save_bytes",
+    "save_bytes_strict",
+    "save_bytes_versioned",
 ]

@@ -128,6 +128,31 @@ class RetryConfig(BaseModel):
     initial_delay: float = Field(default=1.0, ge=0.0)
     max_delay: float = Field(default=60.0, ge=0.0)
     exponential_base: float = Field(default=2.0, gt=1.0)
+    # ±jitter_ratio uniform multiplicative jitter on each retry delay. 0.0
+    # disables jitter (deterministic backoff). 0.25 means each computed delay
+    # is multiplied by a uniform sample in [0.75, 1.25]. Mitigates retry
+    # storms when N parallel workers simultaneously hit 429.
+    jitter_ratio: float = Field(default=0.25, ge=0.0, le=1.0)
+
+
+class ConcurrencyConfig(BaseModel):
+    """Parallel-execution knobs for image generation.
+
+    `image_workers` bounds the `ThreadPoolExecutor` width used by
+    `image/parallel.py` for page_render, character sheet, and location
+    sheet generation. Default sized for OpenAI Tier 5 (IPM=250) at ~7.7%
+    steady-state utilization given gpt-image-2's ~50s/job latency,
+    leaving 5x headroom for retry storms and concurrent runs. Drop to 1
+    for serial debugging.
+
+    Upper bound is a soft architectural ceiling: a single mangaka run
+    has at most ~32 image calls (24 pages + 8 sheets), so values >64
+    just leave workers idle. Tier 6+ users may want to lift this — bump
+    the cap rather than tuning around it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    image_workers: int = Field(default=16, ge=1, le=256)
 
 
 class LayerConfig(BaseModel):
@@ -181,6 +206,7 @@ class MangakaConfig(BaseModel):
     image: ImageBudgetConfig = Field(default_factory=ImageBudgetConfig)
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
+    concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
     layers: LayersConfig
 
 
@@ -227,6 +253,7 @@ def load_config(path: Path) -> Result[MangakaConfig, MangaError]:
 
 __all__ = [
     "AssetsConfig",
+    "ConcurrencyConfig",
     "GeneralConfig",
     "ImageBudgetConfig",
     "ImageProviderConfig",

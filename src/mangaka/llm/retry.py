@@ -8,6 +8,7 @@ Retry policy is owned by the caller (mlsg2 AGENTS.md §Agents and tool layers)
 
 from __future__ import annotations
 
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -37,9 +38,23 @@ class RetryHandler:
         return error.kind in _RETRYABLE_KINDS
 
     def calculate_delay(self, attempt: int) -> float:
-        """Exponential backoff capped at `max_delay`."""
+        """Exponential backoff capped at `max_delay`, with multiplicative jitter.
+
+        Jitter disperses retry waves when N parallel workers all hit 429 at
+        the same instant. Each call samples a fresh uniform multiplier in
+        `[1 - jitter_ratio, 1 + jitter_ratio]`. Sampling is per-call and not
+        seeded by attempt, so two threads at the same attempt count get
+        different delays.
+        """
         delay = self.config.initial_delay * (self.config.exponential_base ** attempt)
-        return min(delay, self.config.max_delay)
+        delay = min(delay, self.config.max_delay)
+        if self.config.jitter_ratio > 0.0:
+            jitter = random.uniform(
+                1.0 - self.config.jitter_ratio,
+                1.0 + self.config.jitter_ratio,
+            )
+            delay *= jitter
+        return delay
 
     def execute[T](
         self,

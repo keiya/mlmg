@@ -54,6 +54,13 @@ max_retries = 3
 initial_delay = 1.0
 max_delay = 60.0
 exponential_base = 2.0
+jitter_ratio = 0.25
+
+[concurrency]
+# Worker count for parallel image generation (page_render, character sheets,
+# location sheets). 16 ≈ 7.7% of OpenAI Tier 5 IPM cap (250) given ~50s/job
+# wall-clock at quality=high — leaves 5x headroom for retry storms.
+image_workers = 16
 
 [layers.plot]
 model = "gpt-5.4-mini"
