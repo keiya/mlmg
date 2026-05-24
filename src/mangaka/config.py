@@ -44,6 +44,12 @@ class PdfConfig(BaseModel):
     # a silent no-op. Re-add when export_pdf gains a cover branch.
     fit: Literal["contain"] = "contain"
     binding: Literal["rtl", "ltr"] = "rtl"
+    # PoC 2026-05-24: PNG-embedded PDFs were ~16 MB for 4 pages, too heavy
+    # for sharing / Kindle / multi-page work. JPEG q=85 cuts size ~9× with
+    # no visible quality loss on gpt-image-2 output. PNG remains opt-in via
+    # config for users who want lossless.
+    image_format: Literal["jpeg", "png"] = "jpeg"
+    jpeg_quality: int = Field(default=85, ge=1, le=100)
 
 
 class LimitsConfig(BaseModel):

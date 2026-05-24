@@ -18,6 +18,8 @@ quality = "high"
 page_size = "A5"
 fit = "contain"
 binding = "rtl"
+image_format = "jpeg"
+jpeg_quality = 85
 
 [limits]
 max_pages = 4

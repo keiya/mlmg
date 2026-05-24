@@ -8,10 +8,12 @@ to page right-to-left.
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 from PIL import Image
 from reportlab.lib.pagesizes import A4, A5, B5  # type: ignore[import-untyped]
+from reportlab.lib.utils import ImageReader  # type: ignore[import-untyped]
 from reportlab.pdfgen import canvas as rl_canvas  # type: ignore[import-untyped]
 
 from mangaka.config import MangakaConfig
@@ -91,6 +93,25 @@ def export_pdf(
             try:
                 with Image.open(page.image_path) as im:
                     image_w, image_h = im.size
+                    if config.pdf.image_format == "jpeg":
+                        # Re-encode in memory so the embedded image uses
+                        # DCTDecode (JPEG) instead of FlateDecode (PNG) — cuts
+                        # output PDF size ~9× with no visible loss on gpt-image-2
+                        # output. We pass the JPEG-encoded buffer through
+                        # ImageReader so reportlab embeds it as-is.
+                        buf = io.BytesIO()
+                        im.convert("RGB").save(
+                            buf,
+                            "JPEG",
+                            quality=config.pdf.jpeg_quality,
+                            optimize=True,
+                        )
+                        buf.seek(0)
+                        image_source: ImageReader | str = ImageReader(buf)  # type: ignore[no-untyped-call]
+                    else:
+                        # PNG path: hand reportlab the file directly. No
+                        # in-memory copy, no re-encode.
+                        image_source = str(page.image_path)
             except OSError as exc:
                 return Failure(
                     MangaError(
@@ -102,7 +123,7 @@ def export_pdf(
 
             draw_w, draw_h, ox, oy = _fit_in_box(image_w, image_h, page_w, page_h)
             c.drawImage(  # type: ignore[no-untyped-call]
-                str(page.image_path),
+                image_source,
                 ox,
                 oy,
                 width=draw_w,
@@ -128,6 +149,8 @@ def export_pdf(
         pages=len(pages_sorted),
         page_size=config.pdf.page_size,
         binding=config.pdf.binding,
+        image_format=config.pdf.image_format,
+        jpeg_quality=config.pdf.jpeg_quality if config.pdf.image_format == "jpeg" else None,
     )
     return Success(output_path)
 

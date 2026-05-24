@@ -153,6 +153,8 @@ quality = "high"
 page_size = "A5"
 fit = "contain"
 binding = "rtl"
+image_format = "jpeg"          # "jpeg" (default, ~9× smaller) or "png" (lossless)
+jpeg_quality = 85              # 1-100. 85 is the manga sweet spot for gpt-image-2 output
 
 [models]
 default = "gpt-5.4-mini"      # 大半のレイヤーで使う安価モデル

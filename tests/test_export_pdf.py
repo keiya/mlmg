@@ -129,3 +129,40 @@ def test_export_pdf_page_size_from_config(
         w = float(mediabox[2])
         # Tolerate sub-point rounding.
         assert abs(w - expected_w) < 1.0
+
+
+def test_export_pdf_jpeg_and_png_both_succeed(tmp_path: Path) -> None:
+    """Both `image_format` settings produce a valid PDF.
+
+    A naive size comparison fails for the synthetic solid-color fixtures
+    (single-color PNG with FlateDecode is smaller than JPEG headers + DCT
+    overhead), but on real gpt-image-2 output JPEG is ~9× smaller. This
+    test guards the structural plumbing — the size win is observed in
+    real runs, not in unit fixtures.
+    """
+    state = _state_with_pages(tmp_path, n=3)
+    base = make_test_config()
+    for fmt in ("jpeg", "png"):
+        cfg = base.model_copy(
+            update={"pdf": base.pdf.model_copy(update={"image_format": fmt})}
+        )
+        out = tmp_path / f"{fmt}.pdf"
+        assert isinstance(export_pdf(state, out, cfg), Success)
+        assert out.exists()
+        assert out.stat().st_size > 0
+        with pikepdf.open(out) as pdf:
+            assert len(pdf.pages) == 3
+
+
+def test_export_pdf_jpeg_quality_clamped_in_config() -> None:
+    """`jpeg_quality` is constrained to [1, 100] via Pydantic Field."""
+    from pydantic import ValidationError
+
+    from mangaka.config import PdfConfig
+
+    PdfConfig(jpeg_quality=1)  # ok
+    PdfConfig(jpeg_quality=100)  # ok
+    with pytest.raises(ValidationError):
+        PdfConfig(jpeg_quality=0)
+    with pytest.raises(ValidationError):
+        PdfConfig(jpeg_quality=101)
