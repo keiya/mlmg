@@ -25,11 +25,11 @@ jpeg_quality = 85
 max_pages = 24
 max_arc_phases = 5
 max_panels_per_page = 8
-max_main_characters = 8
-max_locations = 6
+max_main_characters = 3
+max_locations = 3
 max_retries = 3
-max_image_retries = 2
-max_parse_retries = 2
+max_image_retries = 3
+max_parse_retries = 3
 
 [assets]
 character_sheets_per_char = 1
@@ -46,7 +46,7 @@ max_character_summary_total_chars = 1500
 
 [models]
 default = "gpt-5.4-mini"
-validation = "gpt-5.4"
+validation = "gpt-5.5"
 naming = "gpt-5.4-mini"
 
 [retry]
@@ -68,7 +68,7 @@ max_tokens = 48000
 thinking = false
 
 [layers.mpbv]
-model = "gpt-5.4"
+model = "gpt-5.5"
 temperature = 0.7
 max_tokens = 64000
 thinking = true
