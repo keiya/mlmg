@@ -203,6 +203,10 @@ Deliverable: 4 ページの A5 PDF が出力される。`runs/{name}/manga.pdf` 
 - **prompts/ をパッケージ同梱**: 現状 `PromptLoader` は `Path(__file__).parents[3] / "prompts"` でディスク上の repo を前提にしている。`uv run`（editable）では動くが、wheel/sdist で配布した場合に `site-packages` から `parents[3]/prompts` を見るので解決できない。M5 で `importlib.resources` ベースの loader に切り替えるか、`pyproject.toml` で `prompts/` を package data として同梱する（mlsg2 も同じ問題を抱えていた）
 - **`limits.max_parse_retries` を全レイヤーに適用**: M3 で PagePlan には parse retry を実装、M4 で PageBeat にも実装した。残りは Stylist / Character / Location — 「1 回パースして失敗したら即 abort」のまま。LLM の format drift で run 全体を落とすコストが高いので、PagePlan/PageBeat で書いた retry-with-feedback パターンを共有ヘルパー `parse_with_retry(prompt, llm, parser, layer_config, max_parse_retries)` に抽出して残りのレイヤーでも使う（M5 のクリーンアップ枠で対応、または別 milestone）
 - **state JSON のパス可搬性**: 現状 `persistence._serialize` は `state.stylist.style_ref_path` 等を `str(Path(...))` でそのまま書き出している。CLI が `Path(config.general.runs_dir) / run_name` で run_dir を組み立てる際は通常 CWD 相対なので、別 CWD からの `mangaka export` や run dir の移動でパス解決が壊れる。M5 で `state.json` 内のパスを run_dir 相対に書き出し、ロード時に state file の親ディレクトリを基準に解決する形に変更する（serializer/deserializer 全体に波及するので独立 milestone）
+- **Location canonicalization (PoC 2026-05-24 発覚)**: 現在の `prompts/06_location.md` は LLM が同じ施設のアングル違いを別 location として扱うことを許してしまう。4 ページ PoC で 1 つのコンビニが `maruhachi_exterior_night` / `maruhachi_salesfloor_night` / `maruhachi_register_front_night` / `maruhachi_backroom_night` の 4 ロケに分裂し、各画像が独立して `img.edit(refs=[style.png])` 生成されるので**内外の絵柄整合が崩れた**（外観は広い郊外店、内観は狭い都市店）。コスト・時間も無駄に増える。対応案 2 つ:
+  1. **プロンプト修正**: 「同じ施設のアングル違いは別ロケとして扱わない。アングル指定は PageBeat の camera フィールドで行う」を明示。1 location = 1 canonical 設定画を強制
+  2. **Location-edit feature (v2 候補)**: 時間帯/季節バリアントを残したい場合、`img.edit(prompt, base=canonical_loc.png, refs=[style.png])` で canonical から派生させて整合性を担保。location 層の API 変更を要するので別 milestone
+  さらに post-parse validation で「N 個の location が同じ prefix を共有する場合に warn」を追加すると過剰分裂を検出できる
 
 Deliverable: `mangaka run "seed"` で end-to-end の短編漫画 PDF が出る。inject 5 種類で気に入らない部分だけリテイクできる。`mangaka status` で累計コストが見える。
 

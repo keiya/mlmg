@@ -226,3 +226,67 @@ def test_location_invalid_id_after_valid_raises_not_dropped() -> None:
     result = parse_location_markdown(md)
     assert isinstance(result, Failure)
     assert result.failure().kind == ErrorKind.PARSE_ERROR
+
+
+def test_character_fullwidth_parens() -> None:
+    md = textwrap.dedent(
+        """\
+        ## アリス（alice）
+        ### 外見
+        ボブカット
+        """
+    )
+    result = parse_character_markdown(md)
+    assert isinstance(result, Success)
+    chars = result.unwrap()
+    assert len(chars) == 1
+    assert chars[0].id == "alice"
+    assert chars[0].name == "アリス"
+
+
+def test_location_fullwidth_parens() -> None:
+    md = textwrap.dedent(
+        """\
+        ## 屋上（rooftop_morning）
+        ### 視覚的特徴
+        広い
+        """
+    )
+    result = parse_location_markdown(md)
+    assert isinstance(result, Success)
+    locs = result.unwrap()
+    assert len(locs) == 1
+    assert locs[0].id == "rooftop_morning"
+    assert locs[0].name == "屋上"
+
+
+def test_character_multiple_paren_groups_picks_last() -> None:
+    md = textwrap.dedent(
+        """\
+        ## アリス（17歳・高校生）（alice）
+        ### 外見
+        ボブ
+        """
+    )
+    result = parse_character_markdown(md)
+    assert isinstance(result, Success)
+    chars = result.unwrap()
+    assert len(chars) == 1
+    assert chars[0].id == "alice"
+    assert "17歳" in chars[0].name
+
+
+def test_location_multiple_paren_groups_picks_last() -> None:
+    md = textwrap.dedent(
+        """\
+        ## マルハチ青潮南店（店内）（maruhachi_interior_night）
+        ### 視覚的特徴
+        蛍光灯
+        """
+    )
+    result = parse_location_markdown(md)
+    assert isinstance(result, Success)
+    locs = result.unwrap()
+    assert len(locs) == 1
+    assert locs[0].id == "maruhachi_interior_night"
+    assert "店内" in locs[0].name

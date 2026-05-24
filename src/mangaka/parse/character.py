@@ -33,7 +33,7 @@ _H2_ANY_RE = re.compile(r"^##\s+(?P<text>[^\n]+)$", re.MULTILINE)
 # fail the regex match outright and silently get appended to the previous
 # block's description instead of producing a typed PARSE_ERROR.
 _CHAR_HEADER_RE = re.compile(
-    r"^##\s+(?P<name>[^\n(]+?)\s*\((?P<raw_id>[^)\n]+)\)[^\n]*$",
+    r"^##\s+(?P<name>.+?)\s*[(（](?P<raw_id>[^)）\n]+)[)）][^(（\n]*$",
     re.MULTILINE,
 )
 

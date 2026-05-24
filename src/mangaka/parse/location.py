@@ -13,7 +13,7 @@ _H2_ANY_RE = re.compile(r"^##\s+(?P<text>[^\n]+)$", re.MULTILINE)
 
 # See parse/character.py for the rationale on `raw_id` + post-validation.
 _LOC_HEADER_RE = re.compile(
-    r"^##\s+(?P<name>[^\n(]+?)\s*\((?P<raw_id>[^)\n]+)\)[^\n]*$",
+    r"^##\s+(?P<name>.+?)\s*[(（](?P<raw_id>[^)）\n]+)[)）][^(（\n]*$",
     re.MULTILINE,
 )
 

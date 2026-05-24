@@ -1,0 +1,104 @@
+# PoC config — 4-page short for first end-to-end run.
+# Differs from config.toml only in limits.max_pages.
+
+[general]
+language = "ja"
+runs_dir = "runs"
+
+[llm_provider]
+provider = "openai"
+
+[image_provider]
+provider = "openai"
+model = "gpt-image-2"
+default_size = "1024x1536"
+quality = "high"
+
+[pdf]
+page_size = "A5"
+fit = "contain"
+binding = "rtl"
+
+[limits]
+max_pages = 4
+max_arc_phases = 5
+max_panels_per_page = 8
+max_main_characters = 8
+max_locations = 6
+max_retries = 3
+max_image_retries = 2
+max_parse_retries = 2
+
+[assets]
+character_sheets_per_char = 1
+location_sheets_per_loc = 1
+
+[image]
+max_refs_per_page = 16
+include_prev_page_ref = true
+max_prompt_chars = 20000
+warn_prompt_chars = 12000
+max_location_summary_chars = 600
+max_character_summary_chars = 300
+max_character_summary_total_chars = 1500
+
+[models]
+default = "gpt-5.4-mini"
+validation = "gpt-5.4"
+naming = "gpt-5.4-mini"
+
+[retry]
+max_retries = 3
+initial_delay = 1.0
+max_delay = 60.0
+exponential_base = 2.0
+
+[layers.plot]
+model = "gpt-5.4-mini"
+temperature = 1.0
+max_tokens = 48000
+thinking = false
+
+[layers.backstory]
+model = "gpt-5.4-mini"
+temperature = 0.9
+max_tokens = 48000
+thinking = false
+
+[layers.mpbv]
+model = "gpt-5.4"
+temperature = 0.7
+max_tokens = 64000
+thinking = true
+reasoning_effort = "high"
+
+[layers.stylist]
+model = "gpt-5.4-mini"
+temperature = 0.7
+max_tokens = 8192
+thinking = false
+
+[layers.character]
+model = "gpt-5.4-mini"
+temperature = 1.0
+max_tokens = 16000
+thinking = false
+
+[layers.location]
+model = "gpt-5.4-mini"
+temperature = 0.9
+max_tokens = 16000
+thinking = false
+
+[layers.page_plan]
+model = "gpt-5.4"
+temperature = 0.7
+max_tokens = 16000
+thinking = true
+reasoning_effort = "medium"
+
+[layers.page_beat]
+model = "gpt-5.4-mini"
+temperature = 0.7
+max_tokens = 16000
+thinking = false
