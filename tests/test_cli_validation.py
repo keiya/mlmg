@@ -131,8 +131,7 @@ def test_run_subcommand_refuses_existing_run_dir(tmp_path: Path) -> None:
         '[layers.stylist]\nmodel = "x"\nmax_tokens = 1\n'
         '[layers.character]\nmodel = "x"\nmax_tokens = 1\n'
         '[layers.location]\nmodel = "x"\nmax_tokens = 1\n'
-        '[layers.page_plan]\nmodel = "x"\nmax_tokens = 1\nthinking = true\nreasoning_effort = "medium"\n'
-        '[layers.page_beat]\nmodel = "x"\nmax_tokens = 1\n',
+        '[layers.page_plan]\nmodel = "x"\nmax_tokens = 1\nthinking = true\nreasoning_effort = "medium"\n',
         encoding="utf-8",
     )
 
@@ -181,8 +180,7 @@ def test_run_subcommand_force_clears_stale_state_files(tmp_path: Path) -> None:
         '[layers.stylist]\nmodel = "x"\nmax_tokens = 1\n'
         '[layers.character]\nmodel = "x"\nmax_tokens = 1\n'
         '[layers.location]\nmodel = "x"\nmax_tokens = 1\n'
-        '[layers.page_plan]\nmodel = "x"\nmax_tokens = 1\nthinking = true\nreasoning_effort = "medium"\n'
-        '[layers.page_beat]\nmodel = "x"\nmax_tokens = 1\n',
+        '[layers.page_plan]\nmodel = "x"\nmax_tokens = 1\nthinking = true\nreasoning_effort = "medium"\n',
         encoding="utf-8",
     )
 

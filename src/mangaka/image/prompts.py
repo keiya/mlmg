@@ -202,6 +202,18 @@ def build_page_prompt(
     parts.append(
         "コマ番号・サイズ指示などのメタ情報は指示文の見出しであり、画面に文字として描かないこと。"
     )
+    parts.append("")
+
+    # Reinforcement at the tail (model attends more to the end). The earlier
+    # "右上から左下" mentions get diluted across 200+ lines; output drifted to
+    # LTR on the 2026-05-24 E2E PoC. Make it explicit one more time as the
+    # last instruction before the model starts composing.
+    parts.append("【最重要・読み順】")
+    parts.append(
+        "コマの読み順は必ず **右 → 左、上 → 下** (日本の漫画と同じ右綴じ)。"
+        "1 コマ目は右上、最後のコマは左下になるよう配置すること。"
+        "左から右に流れる西洋コミック / webtoon 風の構成にはしない。"
+    )
 
     prompt = "\n".join(parts)
 

@@ -55,12 +55,6 @@ _DEFAULT_LAYERS_TOML = textwrap.dedent(
     max_tokens = 16000
     thinking = true
     reasoning_effort = "medium"
-
-    [layers.page_beat]
-    model = "gpt-5.4-mini"
-    temperature = 0.7
-    max_tokens = 16000
-    thinking = false
     """
 ).lstrip()
 
@@ -79,6 +73,30 @@ def test_load_config_defaults(tmp_path: Path) -> None:
     assert cfg.image.max_refs_per_page == 16
     assert cfg.pdf.binding == "rtl"
     assert cfg.layers.mpbv.reasoning_effort == "high"
+
+
+def test_legacy_page_beat_layer_silently_dropped(tmp_path: Path) -> None:
+    """Old run dirs snapshotted configs containing [layers.page_beat]
+    before the layer was removed (commit 71f9119). `mangaka export
+    <old_run>` loads that snapshot and would hard-fail on the now-
+    forbidden extra key. The before-validator in LayersConfig drops
+    page_beat silently so existing runs still export."""
+    legacy_extra = textwrap.dedent(
+        """
+        [layers.page_beat]
+        model = "gpt-5.4-mini"
+        temperature = 0.7
+        max_tokens = 16000
+        thinking = false
+        """
+    )
+    p = _write_config(tmp_path, _DEFAULT_LAYERS_TOML + legacy_extra)
+    result = load_config(p)
+    assert isinstance(result, Success)
+    cfg = result.unwrap()
+    # Layer is gone from the dataclass — confirm we dropped it, not
+    # silently absorbed it as an unknown attribute.
+    assert not hasattr(cfg.layers, "page_beat")
 
 
 def test_pdf_fit_cover_rejected(tmp_path: Path) -> None:

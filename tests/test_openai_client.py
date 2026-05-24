@@ -12,7 +12,7 @@ from openai import APIStatusError
 from returns.result import Failure
 
 from mangaka.config import RetryConfig
-from mangaka.errors import ErrorKind
+from mangaka.errors import ErrorKind, MangaError
 from mangaka.llm.client_openai import OpenAILLMClient
 
 
@@ -135,7 +135,55 @@ def test_incomplete_response_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     result = client.complete("hi", model="m")
     assert isinstance(result, Failure)
     err = result.failure()
-    assert err.kind == ErrorKind.LLM_CALL_FAILED
+    # PoC 2026-05-24: max_output_tokens is deterministic (same prompt +
+    # same cap → same truncation), classify as LLM_OUTPUT_TRUNCATED so
+    # RetryHandler doesn't waste 13 min on a doomed retry pattern.
+    assert err.kind == ErrorKind.LLM_OUTPUT_TRUNCATED
     assert err.detail is not None
     assert err.detail.get("status") == "incomplete"
     assert err.detail.get("incomplete_reason") == "max_output_tokens"
+
+
+def test_incomplete_non_truncation_remains_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Other incomplete reasons (content_filter, upstream_failure, etc.)
+    stay LLM_CALL_FAILED — they may be transient."""
+    from types import SimpleNamespace
+
+    client = OpenAILLMClient(
+        default_model="m",
+        retry_config=RetryConfig(max_retries=0, initial_delay=0.0, max_delay=0.0),
+        api_key="sk-fake",
+    )
+
+    def _return_filter(**_: object) -> object:
+        return SimpleNamespace(
+            status="incomplete",
+            incomplete_details=SimpleNamespace(reason="content_filter"),
+            output_text="",
+            usage=None,
+        )
+
+    monkeypatch.setattr(client._client.responses, "create", _return_filter)  # type: ignore[union-attr]
+
+    result = client.complete("hi", model="m")
+    assert isinstance(result, Failure)
+    err = result.failure()
+    assert err.kind == ErrorKind.LLM_CALL_FAILED
+    assert err.detail is not None
+    assert err.detail.get("incomplete_reason") == "content_filter"
+
+
+def test_llm_output_truncated_is_not_retryable() -> None:
+    """RetryHandler must NOT retry LLM_OUTPUT_TRUNCATED — same cap, same prompt
+    → same truncation, retries are pure cost."""
+    from mangaka.llm.retry import RetryHandler
+
+    handler = RetryHandler(
+        RetryConfig(max_retries=3, initial_delay=0.0, max_delay=0.0, jitter_ratio=0.0)
+    )
+    err = MangaError(
+        kind=ErrorKind.LLM_OUTPUT_TRUNCATED, message="truncated"
+    )
+    assert handler.is_retryable(err) is False

@@ -2,12 +2,8 @@
 
 state JSON stores **path references and parsed text summaries only** — no
 base64-encoded image bytes, no embedded markdown source files. Canonical
-artifacts live at fixed paths under `runs/{name}/` (assets/, page_beats/,
-pages/) and the state JSON points at them.
-
-M1 only persists text-only layers (Plot / Backstory / MPBV). Image layers
-(Stylist / Character / Location / PagePlan / PageBeat / Page) land in M2-M4
-and extend `_serialize` / `_deserialize` accordingly.
+artifacts live at fixed paths under `runs/{name}/` (assets/, pages/) and
+the state JSON points at them.
 """
 
 from __future__ import annotations

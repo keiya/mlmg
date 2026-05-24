@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -190,7 +190,21 @@ class LayersConfig(BaseModel):
     character: LayerConfig
     location: LayerConfig
     page_plan: LayerConfig
-    page_beat: LayerConfig
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_page_beat(cls, data: object) -> object:
+        # PageBeat layer was removed in commit 71f9119 (2026-05-24) but
+        # pre-existing run dirs snapshotted a config containing
+        # `[layers.page_beat]`. `mangaka export <old_run>` loads that
+        # snapshot; with extra="forbid" the legacy key would now break
+        # the export of every previously-generated run. Drop it silently
+        # rather than make every user re-edit their run snapshots.
+        if not isinstance(data, dict):
+            return data
+        data_dict = cast("dict[str, object]", data)
+        data_dict.pop("page_beat", None)
+        return data_dict
 
 
 class MangakaConfig(BaseModel):

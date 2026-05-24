@@ -132,15 +132,27 @@ class OpenAILLMClient:
         # otherwise truncated Plot/Backstory/MPBV markdown gets persisted
         # as canonical layer output. `status` is "completed" on success;
         # "incomplete" / "failed" indicate max_output_tokens hit, content
-        # filter, or upstream failure. Treat as a retryable call-failed
-        # so the operator can re-run with a larger max_tokens budget.
+        # filter, or upstream failure.
+        #
+        # `max_output_tokens` is **deterministic** — retrying the same
+        # prompt with the same cap produces the same truncation. PoC
+        # 2026-05-24 saw 13 minutes burned on a doomed retry pattern.
+        # Classify as LLM_OUTPUT_TRUNCATED (NOT in _RETRYABLE_KINDS) so
+        # the operator fixes the cap and re-runs instead. Other
+        # incomplete reasons (content filter, upstream failure) may be
+        # transient; keep them retryable.
         status = getattr(response, "status", None)
         if status not in (None, "completed"):
             incomplete = getattr(response, "incomplete_details", None)
             reason = getattr(incomplete, "reason", None)
+            kind = (
+                ErrorKind.LLM_OUTPUT_TRUNCATED
+                if reason == "max_output_tokens"
+                else ErrorKind.LLM_CALL_FAILED
+            )
             return Failure(
                 MangaError(
-                    kind=ErrorKind.LLM_CALL_FAILED,
+                    kind=kind,
                     message=(
                         f"OpenAI response did not complete (status={status!r}, "
                         f"reason={reason!r}) — partial output rejected"

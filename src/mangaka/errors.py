@@ -18,6 +18,7 @@ class ErrorKind(Enum):
     LLM_BAD_REQUEST = auto()       # 4xx (bad model / params / auth) — NOT retried
     LLM_RATE_LIMITED = auto()      # 429 — retried with backoff
     LLM_CONTEXT_TOO_LONG = auto()
+    LLM_OUTPUT_TRUNCATED = auto()  # max_output_tokens hit — NOT retried (deterministic)
 
     # Image generation
     IMAGE_CALL_FAILED = auto()

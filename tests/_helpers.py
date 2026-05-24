@@ -65,7 +65,6 @@ def make_test_config(*, runs_dir: str = "runs") -> MangakaConfig:
             character=layer(),
             location=layer(),
             page_plan=page_plan_layer,
-            page_beat=layer(),
         ),
     )
 

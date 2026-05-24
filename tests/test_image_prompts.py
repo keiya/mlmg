@@ -238,6 +238,15 @@ def test_build_page_prompt_happy_path(tmp_path: Path) -> None:
     assert "ナレーション枠" in prompt
     # Text rules
     assert "【文字について】" in prompt
+    # RTL reinforcement at tail (PoC 2026-05-24: earlier mentions of
+    # "右上から左下" got diluted; output drifted to LTR. Last-line
+    # repetition keeps the model on Japanese manga binding).
+    assert "【最重要・読み順】" in prompt
+    assert "右綴じ" in prompt
+    # The RTL block must be the LAST instruction so it stays salient.
+    rtl_idx = prompt.index("【最重要・読み順】")
+    text_idx = prompt.index("【文字について】")
+    assert rtl_idx > text_idx
 
 
 def test_build_page_prompt_fails_when_too_long(tmp_path: Path) -> None:
