@@ -200,6 +200,9 @@ Deliverable: 4 ページの A5 PDF が出力される。`runs/{name}/manga.pdf` 
   - `--inject-page-beat N` 時に N+1 以降が **cascade されない** (v1 既知の制約) ことを assert
 - `README.md` 書き上げ
 - 16-24 ページの本格短編を 1 本流して目視確認
+- **prompts/ をパッケージ同梱**: 現状 `PromptLoader` は `Path(__file__).parents[3] / "prompts"` でディスク上の repo を前提にしている。`uv run`（editable）では動くが、wheel/sdist で配布した場合に `site-packages` から `parents[3]/prompts` を見るので解決できない。M5 で `importlib.resources` ベースの loader に切り替えるか、`pyproject.toml` で `prompts/` を package data として同梱する（mlsg2 も同じ問題を抱えていた）
+- **`limits.max_parse_retries` を全レイヤーに適用**: M3 で PagePlan には parse retry を実装、M4 で PageBeat にも実装した。残りは Stylist / Character / Location — 「1 回パースして失敗したら即 abort」のまま。LLM の format drift で run 全体を落とすコストが高いので、PagePlan/PageBeat で書いた retry-with-feedback パターンを共有ヘルパー `parse_with_retry(prompt, llm, parser, layer_config, max_parse_retries)` に抽出して残りのレイヤーでも使う（M5 のクリーンアップ枠で対応、または別 milestone）
+- **state JSON のパス可搬性**: 現状 `persistence._serialize` は `state.stylist.style_ref_path` 等を `str(Path(...))` でそのまま書き出している。CLI が `Path(config.general.runs_dir) / run_name` で run_dir を組み立てる際は通常 CWD 相対なので、別 CWD からの `mangaka export` や run dir の移動でパス解決が壊れる。M5 で `state.json` 内のパスを run_dir 相対に書き出し、ロード時に state file の親ディレクトリを基準に解決する形に変更する（serializer/deserializer 全体に波及するので独立 milestone）
 
 Deliverable: `mangaka run "seed"` で end-to-end の短編漫画 PDF が出る。inject 5 種類で気に入らない部分だけリテイクできる。`mangaka status` で累計コストが見える。
 

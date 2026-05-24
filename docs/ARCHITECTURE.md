@@ -795,7 +795,7 @@ quality = "high"
 
 [pdf]
 page_size = "A5"                # A5 / B5 / A4 (ISO 216 比なので画像変換不要で切替可)
-fit = "contain"                 # contain (白フチ許容) / cover (クロップ, 漫画では非推奨)
+fit = "contain"                 # v1 は contain 固定（cover は v2 候補）
 binding = "rtl"                 # rtl / ltr (v1 は rtl 固定運用)
 
 [limits]

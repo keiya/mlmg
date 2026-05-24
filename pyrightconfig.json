@@ -1,0 +1,7 @@
+{
+  "include": ["src", "tests", "tools"],
+  "exclude": ["**/__pycache__", "**/.venv", "runs", "data"],
+  "typeCheckingMode": "strict",
+  "pythonVersion": "3.12",
+  "pythonPlatform": "All"
+}

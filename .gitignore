@@ -1,1 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+
+# Build
+build/
+dist/
+
+# Secrets
 .env
+
+# Claude Code harness runtime state (per-checkout, never commit)
+.claude/*.lock
+
+# Generated runs (canonical artifacts, not source)
+runs/
+
+# Image artifacts at top level (run output only; tests use bytes/temp paths)
+*.png
+
+# OS
+.DS_Store

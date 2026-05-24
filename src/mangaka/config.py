@@ -1,0 +1,229 @@
+"""Pydantic configuration model loaded from TOML.
+
+`load_config(path)` reads a TOML file via stdlib `tomllib` and validates it
+into a `MangakaConfig`. All validation lives here (e.g. ref budget >= 2).
+"""
+
+from __future__ import annotations
+
+import tomllib
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+from mangaka.errors import ErrorKind, MangaError
+from mangaka.result import Failure, Result, Success
+
+
+class GeneralConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    language: str = "ja"
+    runs_dir: str = "runs"
+
+
+class LLMProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["openai"] = "openai"
+
+
+class ImageProviderConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["openai"] = "openai"
+    model: str = "gpt-image-2"
+    default_size: str = "1024x1536"
+    quality: str = "high"
+
+
+class PdfConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    page_size: Literal["A5", "B5", "A4"] = "A5"
+    # `fit` is currently fixed to "contain" — export_pdf does not implement
+    # cover-mode cropping yet. ARCHITECTURE.md keeps `cover` as a v2 candidate
+    # since "コマが切れるのは致命" for manga; accepting it in config would be
+    # a silent no-op. Re-add when export_pdf gains a cover branch.
+    fit: Literal["contain"] = "contain"
+    binding: Literal["rtl", "ltr"] = "rtl"
+
+
+class LimitsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_pages: int = Field(default=24, ge=1)
+    max_arc_phases: int = Field(default=5, ge=1)
+    max_panels_per_page: int = Field(default=8, ge=1)
+    max_main_characters: int = Field(default=8, ge=1)
+    max_locations: int = Field(default=6, ge=1)
+    max_retries: int = Field(default=3, ge=0)
+    max_image_retries: int = Field(default=2, ge=0)
+    max_parse_retries: int = Field(default=2, ge=0)
+
+
+class AssetsConfig(BaseModel):
+    """Per-asset sheet counts.
+
+    v1 only generates one sheet per character/location; both fields are
+    constrained to 1. The character/location layers don't consume these
+    values at all — values >1 in earlier drafts of config would have been
+    silent no-ops, which is worse than a load-time rejection. ARCH lists
+    multi-sheet variants as a v2 candidate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    character_sheets_per_char: int = Field(default=1, ge=1, le=1)
+    location_sheets_per_loc: int = Field(default=1, ge=1, le=1)
+
+
+class ImageBudgetConfig(BaseModel):
+    """Budget guards for PageRender prompt assembly.
+
+    `max_refs_per_page` must be >= 2: at minimum we need a style ref plus
+    one content ref (loc / char / prev). Below that the labeled-ref scheme
+    degenerates.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    max_refs_per_page: int = Field(default=16, ge=2, le=16)
+    include_prev_page_ref: bool = True
+    max_prompt_chars: int = Field(default=20000, ge=1)
+    warn_prompt_chars: int = Field(default=12000, ge=1)
+    max_location_summary_chars: int = Field(default=600, ge=1)
+    max_character_summary_chars: int = Field(default=300, ge=1)
+    max_character_summary_total_chars: int = Field(default=1500, ge=1)
+
+    @model_validator(mode="after")
+    def _warn_below_hard_limit(self) -> ImageBudgetConfig:
+        if self.warn_prompt_chars > self.max_prompt_chars:
+            raise ValueError("image.warn_prompt_chars must be <= image.max_prompt_chars")
+        if self.max_character_summary_chars > self.max_character_summary_total_chars:
+            raise ValueError(
+                "image.max_character_summary_chars must be "
+                "<= image.max_character_summary_total_chars"
+            )
+        return self
+
+
+class ModelsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    default: str = "gpt-5.4-mini"
+    validation: str = "gpt-5.4"
+    naming: str = "gpt-5.4-mini"
+
+
+class RetryConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    max_retries: int = Field(default=3, ge=0)
+    initial_delay: float = Field(default=1.0, ge=0.0)
+    max_delay: float = Field(default=60.0, ge=0.0)
+    exponential_base: float = Field(default=2.0, gt=1.0)
+
+
+class LayerConfig(BaseModel):
+    """Per-layer LLM settings.
+
+    `reasoning_effort` is the OpenAI Responses-API knob, used only when
+    `thinking=True`. Anthropic-style token budgets do not apply.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    model: str
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=8192, ge=1)
+    thinking: bool = False
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
+
+    @model_validator(mode="after")
+    def _check_reasoning_effort(self) -> LayerConfig:
+        if self.reasoning_effort is not None and not self.thinking:
+            raise ValueError("reasoning_effort is only valid when thinking=True")
+        if self.thinking and self.reasoning_effort is None:
+            raise ValueError(
+                "thinking=True requires an explicit reasoning_effort "
+                "(minimal/low/medium/high) — defaults are not safe"
+            )
+        return self
+
+
+class LayersConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    plot: LayerConfig
+    backstory: LayerConfig
+    mpbv: LayerConfig
+    stylist: LayerConfig
+    character: LayerConfig
+    location: LayerConfig
+    page_plan: LayerConfig
+    page_beat: LayerConfig
+
+
+class MangakaConfig(BaseModel):
+    """Top-level config matching the schema in ARCHITECTURE.md §設定."""
+
+    model_config = ConfigDict(extra="forbid")
+    general: GeneralConfig = Field(default_factory=GeneralConfig)
+    llm_provider: LLMProviderConfig = Field(default_factory=LLMProviderConfig)
+    image_provider: ImageProviderConfig = Field(default_factory=ImageProviderConfig)
+    pdf: PdfConfig = Field(default_factory=PdfConfig)
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    assets: AssetsConfig = Field(default_factory=AssetsConfig)
+    image: ImageBudgetConfig = Field(default_factory=ImageBudgetConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    retry: RetryConfig = Field(default_factory=RetryConfig)
+    layers: LayersConfig
+
+
+def load_config(path: Path) -> Result[MangakaConfig, MangaError]:
+    """Read a TOML file and validate it into a `MangakaConfig`.
+
+    All validation errors are wrapped into `Failure(MangaError)` with
+    `ErrorKind.CONFIG_ERROR`.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        return Failure(
+            MangaError(
+                kind=ErrorKind.IO_ERROR,
+                message=f"failed to read config file: {path}",
+                detail={"path": str(path), "errno": exc.errno},
+            )
+        )
+
+    try:
+        data = tomllib.loads(raw.decode("utf-8"))
+    except (tomllib.TOMLDecodeError, UnicodeDecodeError) as exc:
+        return Failure(
+            MangaError(
+                kind=ErrorKind.CONFIG_ERROR,
+                message=f"invalid TOML in config: {exc}",
+                detail={"path": str(path)},
+            )
+        )
+
+    try:
+        cfg = MangakaConfig.model_validate(data)
+    except ValidationError as exc:
+        return Failure(
+            MangaError(
+                kind=ErrorKind.CONFIG_ERROR,
+                message=f"config validation failed: {exc}",
+                detail={"path": str(path)},
+            )
+        )
+    return Success(cfg)
+
+
+__all__ = [
+    "AssetsConfig",
+    "GeneralConfig",
+    "ImageBudgetConfig",
+    "ImageProviderConfig",
+    "LLMProviderConfig",
+    "LayerConfig",
+    "LayersConfig",
+    "LimitsConfig",
+    "MangakaConfig",
+    "ModelsConfig",
+    "PdfConfig",
+    "RetryConfig",
+    "load_config",
+]
