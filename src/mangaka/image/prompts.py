@@ -72,7 +72,12 @@ def extract_visual_summary(description: str, *, max_chars: int) -> str:
 def _panel_lines(state: MangaState, page_beat: PageBeat) -> list[str]:
     lines: list[str] = []
     for panel in page_beat.panels:
-        lines.append(f"■ コマ {panel.panel_no} ({_size_label(panel.size_hint)})")
+        # No visible bullet marker — gpt-image-2 was rendering `■ コマ N` as a
+        # literal "1" / "2" label inside the panel. Plain text + colon is read
+        # as a directive header rather than a graphic element.
+        lines.append(
+            f"[Panel {panel.panel_no} / {_size_label(panel.size_hint)}]"
+        )
         lines.append(f"  絵: {panel.visual}")
         if panel.camera:
             lines.append(f"  カメラ: {panel.camera}")
@@ -191,6 +196,11 @@ def build_page_prompt(
     parts.append(
         "吹き出しは必ず話者の口元から伸ばすこと。発話者と聞き手の位置関係を"
         "コマの構図で明示してください。"
+    )
+    parts.append(
+        "コマ番号 (`[Panel N / ...]`) やサイズ指示は **指示文の見出しであり、"
+        "画面に文字として描かないこと**。コマ内に「1」「2」のような番号ラベルを"
+        "置かない。"
     )
 
     prompt = "\n".join(parts)

@@ -218,8 +218,11 @@ def test_build_page_prompt_happy_path(tmp_path: Path) -> None:
     assert "【このページの空気】" in prompt
     assert "静かな緊張" in prompt
     assert "【コマ構成】" in prompt
-    assert "コマ 1" in prompt
-    assert "■ コマ 2" in prompt
+    # Panel markers no longer use `■ コマ N (size)` — gpt-image-2 was rendering
+    # the marker as a literal "1" / "2" label inside the panel.
+    assert "[Panel 1" in prompt
+    assert "[Panel 2" in prompt
+    assert "■ コマ" not in prompt
     assert "ヒュウ" in prompt  # SFX surfaced
     assert "【参照画像の構成】" in prompt
     assert "1 枚目: スタイル参照画" in prompt
