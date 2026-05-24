@@ -17,7 +17,7 @@ from mangaka.config import RetryConfig, load_config
 from mangaka.image.client_openai import OpenAIImageClient
 from mangaka.image.prompts import build_page_prompt
 from mangaka.image.ref_builder import build_refs
-from mangaka.persistence import latest_state_path, load_state, save_state, state_path_for
+from mangaka.persistence import latest_state_path, load_state
 from mangaka.result import Failure
 
 
@@ -74,6 +74,10 @@ def main() -> int:
         return 1
     img_bytes = edit_result.unwrap()
     out = run_dir / "pages" / f"page_{page_number:03d}.png"
+    # If this is the first single-page render on a run that's only been through
+    # page_beat (no page_render layer yet), pages/ won't exist. Without mkdir
+    # the paid img.edit bytes get lost to FileNotFoundError.
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(img_bytes)
     print(f"✓ wrote {out} ({len(img_bytes)} bytes)")
     return 0

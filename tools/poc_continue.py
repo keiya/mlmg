@@ -70,7 +70,16 @@ def main() -> int:
     parser.add_argument(
         "--until", required=True, help="Stop after this layer (stylist..page_render)"
     )
-    parser.add_argument("--config", type=Path, default=Path("config.toml"))
+    parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to config.toml. Default: run_dir/config.toml snapshot, "
+            "fallback ./config.toml. Mirrors `mangaka export` resolution so "
+            "resumes use the same limits the run was created with."
+        ),
+    )
     args = parser.parse_args()
 
     setup_logging(verbose=False, quiet=False)
@@ -81,7 +90,16 @@ def main() -> int:
         print(f"✗ --until must be one of {sorted(valid_targets)}", file=sys.stderr)
         return 2
 
-    config_result = load_config(args.config)
+    # Resolve config: explicit → snapshot → ./config.toml (mirrors `mangaka export`).
+    snapshot = args.run_dir / "config.toml"
+    if args.config is not None:
+        config_path = args.config
+    elif snapshot.exists():
+        config_path = snapshot
+    else:
+        config_path = Path("config.toml")
+
+    config_result = load_config(config_path)
     if isinstance(config_result, Failure):
         print(f"✗ {config_result.failure().message}", file=sys.stderr)
         return 1

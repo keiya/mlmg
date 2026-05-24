@@ -252,7 +252,11 @@ def _deserialize(data: dict[str, Any]) -> MangaState:
                             SpeechIntent(
                                 speaker_id=cast("str", si["speaker_id"]),
                                 bubble_type=cast("str", si["bubble_type"]),
-                                text=cast("str", si["text"]),
+                                # Pre-53c4be4 state JSONs persisted this field as
+                                # `intent` (meaning description) before the schema
+                                # was redefined as verbatim short dialogue. Accept
+                                # either key so existing runs stay loadable.
+                                text=cast("str", si.get("text") or si["intent"]),
                                 register=cast("str | None", si.get("register")),
                             )
                             for si in si_data

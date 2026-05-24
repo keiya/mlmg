@@ -46,7 +46,7 @@ mlsg2 と共通:
 | Character (text) | **Character (text + 設定画), Stylist の後** |
 | ─ | **Location (新規, text + 設定画), Stylist の後** |
 | Chapter / Timeline | **削除し `PagePlan` に統合**（20 ページ短編に章概念は不要、Timeline も pre-page context で代替できる） |
-| Scene (散文) | **PageBeat (Markdown + YAML frontmatter, exact_dialogue は持たない)** |
+| Scene (散文) | **PageBeat (Markdown + YAML frontmatter, verbatim 短セリフ ≤30 字)** |
 | ─ | **PageRender (新規, gpt-image-2 で 1 ページ 1 画像)** |
 | Export (HTML/PDF 小説) | **Export (PDF 漫画, A5 portrait 148×210mm, RTL)** |
 
@@ -100,8 +100,7 @@ User Input (seed)
               ▼ (per page)
    ┌─────────────────────────────────────┐
    │ 8. PageBeat (Markdown + YAML × P)   │
-   │   visual + speech_intent + sfx       │
-   │   NO exact_dialogue                  │
+   │   visual + speech text ≤30字 + sfx   │
    │   (前 1-2 ページの PageBeat も参照)  │
    └─────────────────────────────────────┘
               │
@@ -167,25 +166,25 @@ v1 では **PageRender がページ画像にセリフ含む全要素を生成す
 - Lettering 層を別に持つコストが高い: 空バルーン検出・座標推定・縦書き日本語フォント配置・改行ルール…別プロジェクト規模の作業
 - 文字が多少崩れても許容範囲。完成原稿としての可読性より、絵柄・表情・コマ割り・テンポを優先
 
-### PageBeat に正確なセリフを持たない
+### PageBeat は短い verbatim セリフを持つ
 
-PageBeat は **「セリフがある場面の演出指示」**であり、台詞台本ではない:
+PageBeat は **コマ単位の演出指示書** で、Speech 行に **吹き出しに描画される短い verbatim セリフ** (≤30 字) を含む:
 
-- `speech_intent`: 「主人公が決意を口にする」「相手が驚く」など意味
-- `register`: 「怒り」「震え」「無感情」など口調のトーン
+- `text`: 「本日も大気圧は安定していますか」など、画像に書かれる実セリフ
+- `register`: 「怒り」「震え」「無感情」など口調のトーン（プロンプトに併記）
 - `emotion`: コマ全体の感情
-- ❌ `exact_dialogue`: **持たない**
+- 1 panel あたり Speech 上限 2 個（dialogue / inner_monologue / narration 合算）
 
-これにより LLM プロンプトの設計が「セリフを書く」モードに引っ張られず、絵作り・演出の指示に集中できる。PageRender は「このコマでこういう感情で発話している場面を描いて」と指示し、gpt-image-2 が**任意の日本語っぽい文字**を吹き出しに入れる。
+> **設計変更（PoC 2026-05-24）**: 当初は `speech_intent`（意味記述）だけを持って画像モデルにセリフ翻訳させる設計だった。しかし PoC で gpt-image-2 は意味記述を verbatim でコピーするか半端に翻訳して破綻させると判明したため、**verbatim セリフ方式**に切り替えた。詳細は `docs/SCHEMA.md` PageBeat 節および `docs/PLAN.md` PoC ノートを参照。
 
 ### 将来の Lettering 移行余地
 
-もし将来「セリフを正確に出したい」需要が出た場合:
-- PageBeat に optional な `exact_dialogue: str` を schema migration で追加
+PoC 2026-05-24 で `SpeechIntent.text` (verbatim 短セリフ) 方式に切り替えたことで「セリフはそこそこ正確に画像内に描かれる」状態になった。さらに高精度を求めるなら:
 - PageRender prompt を「文字は空バルーンで」モードに切替
-- PageRender の後に Lettering 層を挿入
+- PageRender の後に Lettering 層を挿入 (PIL/Pillow で吹き出し検出 → 既存の `SpeechIntent.text` をフォント込みで合成)
+- 縦書き日本語フォント・吹き出し座標推定・改行は別プロジェクト規模
 
-各層は `MangaState → Result[MangaState, MangaError]` の純粋関数なので、間に層を挟むのはアーキ的に自由。**今から先取りでデータを持つ必要はない**。
+各層は `MangaState → Result[MangaState, MangaError]` の純粋関数なので、間に層を挟むのはアーキ的に自由。**`SpeechIntent.text` がそのまま Lettering 入力になるので追加 schema は不要**。
 
 ---
 
@@ -295,9 +294,10 @@ class Panel:
 class SpeechIntent:
     speaker_id: str            # Character ID または予約 ID "narrator"
     bubble_type: str           # "dialogue" | "inner_monologue" | "narration" | "shout"
-    intent: str                # 意味的に何を伝えるか
+    text: str                  # 吹き出しに描画される短い verbatim セリフ (≤ 30 字)
     register: str | None       # 口調のトーン（怒り、震え、無感情、等）
-    # 注: 正確なセリフ文字列は持たない。画像モデルに任意の日本語っぽい文字を描かせる。
+    # 注: PoC 2026-05-24 で `intent` (意味記述) → `text` (verbatim 短セリフ) に
+    # 変更。詳細は docs/SCHEMA.md PageBeat 節を参照。
 
 
 @dataclass(slots=True)
@@ -744,7 +744,7 @@ src/mangaka/
 │   ├── character.py           # text + image sub-step
 │   ├── location.py            # NEW: text + image sub-step
 │   ├── page_plan.py           # NEW: arc + page_outline を出力 (旧 chapter/timeline 統合)
-│   ├── page_beat.py           # NEW: scene.py の置き換え (exact_dialogue なし)
+│   ├── page_beat.py           # NEW: scene.py の置き換え (verbatim 短セリフ生成)
 │   └── page_render.py         # NEW: 画像生成のみ
 ├── llm/
 │   ├── client.py
@@ -771,7 +771,7 @@ prompts/
 ├── 06_location.md             # NEW: ロケ抽出
 ├── 06b_location_sheet.md      # NEW: ロケ設定画生成
 ├── 07_page_plan.md            # NEW: arc 起承転結 + per-page outline 生成
-├── 08_page_beat.md            # NEW: コマ/speech_intent/SFX の Markdown+frontmatter 生成
+├── 08_page_beat.md            # NEW: コマ/Speech (verbatim text)/SFX の Markdown+frontmatter 生成
 └── 09_page_render.md          # NEW: 1 ページ画像生成プロンプト (文字込み)
 ```
 
@@ -897,7 +897,7 @@ thinking = false
 
 | 項目 | 含めない理由 | 拡張時の影響 |
 |---|---|---|
-| **Lettering / Compose 層** | gpt-image-2 が「マンガ」の知識で吹き出し・手書き文字・SFX を込みで描いてくれる。完全な文字精度を求めないので画像モデル任せ。Lettering は空バルーン検出・座標推定・縦書き日本語フォント配置という別プロジェクト規模 | PageRender の後に層を追加、PageBeat に optional な `exact_dialogue` / `balloon_hints` を schema migration で足す |
+| **Lettering / Compose 層** | gpt-image-2 が「マンガ」の知識で吹き出し・手書き文字・SFX を込みで描いてくれる。PoC 2026-05-24 以降は `SpeechIntent.text` を verbatim で渡しているので「そこそこ正確」状態。完全精度には空バルーン検出・座標推定・縦書き日本語フォント配置という別プロジェクト規模が要る | PageRender の後に層を追加、既存の `SpeechIntent.text` を入力に使う (schema migration 不要) |
 | **見開き (spread page)** | アスペクト比・製本・スキーマが全部複雑化 | Page に `format: portrait \| spread` を追加 |
 | **縦スク (webtoon)** | コマ密度・「ページ」概念・出力レイアウトが別物 | output_format mode として並列追加 |
 | **LTR (英訳輸出)** | 現状は日本語固定で十分 | RTL に関わる 3 箇所に flag を入れる |
