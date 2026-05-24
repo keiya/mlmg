@@ -102,7 +102,11 @@ thinking = false
 [layers.page_plan]
 model = "gpt-5.4"
 temperature = 0.7
-max_tokens = 16000
+# thinking=true with reasoning_effort=medium burns 15-25K reasoning tokens
+# on top of the ~5K visible markdown. 16K cap was hitting incomplete
+# (max_output_tokens) and the LLM_CALL_FAILED retry loop ate ~13 min on
+# the doomed retry pattern (PoC 2026-05-24).
+max_tokens = 32000
 thinking = true
 reasoning_effort = "medium"
 
