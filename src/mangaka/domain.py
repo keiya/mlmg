@@ -115,15 +115,17 @@ class PagePlan:
 
 @dataclass(slots=True, frozen=True)
 class SpeechIntent:
-    """Speech directive for the image model. No exact dialogue text.
+    """Verbatim short dialogue for a bubble.
 
-    The image model is free to fill the bubble with any Japanese-looking text;
-    we only convey *what* is being communicated and *how* (register/tone).
+    `text` is the actual line to be drawn inside the bubble (≤ ~30 chars,
+    Japanese). The PoC found that asking the image model to "translate intent
+    into a line" produced garbled output — see `docs/PLAN.md` PoC notes —
+    so we now pass exact text and let the renderer copy it verbatim.
     """
 
     speaker_id: str
     bubble_type: str
-    intent: str
+    text: str
     register: str | None = None
 
 

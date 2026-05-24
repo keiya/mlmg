@@ -154,6 +154,38 @@ def test_tolerant_panel_missing_visual_kept_for_phase_2() -> None:
     assert panel.visual is None
 
 
+def test_speech_text_strips_quote_wrappers() -> None:
+    """LLMs sometimes wrap dialogue in `"..."` or `「...」`. Parser must strip
+    those so the rendered text doesn't show stray quotes."""
+    md = textwrap.dedent(
+        """\
+        ---
+        page_number: 1
+        phase: 起
+        location_id: rooftop
+        character_ids: [alice]
+        mood: 静か
+        ---
+
+        ## Panel 1
+
+        **Visual**: x
+        **Emotion**: y
+
+        **Speech**:
+        - [alice / dialogue / 静か] "本日も大気圧は安定していますか"
+        - [alice / inner_monologue / 諦め] 「いつもの変な準備」
+        - [alice / dialogue / 普通] 裸のセリフ
+        """
+    )
+    result = parse_page_beat_text(md)
+    assert isinstance(result, Success)
+    intents = result.unwrap().panels[0].speech_intents
+    assert intents[0].text == "本日も大気圧は安定していますか"
+    assert intents[1].text == "いつもの変な準備"
+    assert intents[2].text == "裸のセリフ"
+
+
 def test_invalid_speech_line_silently_skipped() -> None:
     """Per SCHEMA: Speech format violations are warnings, NOT panel errors."""
     md = textwrap.dedent(
@@ -181,7 +213,7 @@ def test_invalid_speech_line_silently_skipped() -> None:
     # Only the well-formed line should appear.
     intents = result.unwrap().panels[0].speech_intents
     assert len(intents) == 1
-    assert intents[0].intent == "意図"
+    assert intents[0].text == "意図"
 
 
 # ---------------------------------------------------------------------------

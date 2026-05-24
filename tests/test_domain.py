@@ -126,15 +126,15 @@ def test_speech_intent_register_optional() -> None:
     si = SpeechIntent(
         speaker_id="alice",
         bubble_type="dialogue",
-        intent="決意を口にする",
+        text="やる、絶対に。",
     )
     assert si.register is None
 
 
 def test_frozen_dataclass_rejects_mutation() -> None:
-    si = SpeechIntent(speaker_id="alice", bubble_type="dialogue", intent="x")
+    si = SpeechIntent(speaker_id="alice", bubble_type="dialogue", text="x")
     with pytest.raises((AttributeError, TypeError)):
-        si.intent = "y"  # type: ignore[misc]
+        si.text = "y"  # type: ignore[misc]
 
 
 def test_replace_invalidates_cached_lookups() -> None:

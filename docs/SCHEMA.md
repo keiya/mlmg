@@ -16,7 +16,7 @@
 | Stylist | Markdown | 絵柄ガイド、自由記述 |
 | Character, Location | Markdown | テキスト中心、人間レビュー可能 |
 | PagePlan | JSON | 数値・ID 中心 (`total_pages`, `arc[]`, `page_outline[]`)、構造化処理 |
-| **PageBeat** | **Markdown + YAML frontmatter** | 日本語自由記述が中心 (visual, intent, sfx)、ID 部分のみ構造化 |
+| **PageBeat** | **Markdown + YAML frontmatter** | 日本語自由記述が中心 (visual, speech text, sfx)、ID 部分のみ構造化 |
 | PageRender | 画像 (PNG) | gpt-image-2 出力 |
 
 **PageBeat だけ「両方の良いとこ取り」**: ID と数値は frontmatter で堅く、日本語の演出記述は Markdown で柔らかく。
@@ -104,7 +104,7 @@ mlsg2 の Stylist (文体) と mangaka の絵柄ガイドを **1 つの層に統
 
 ## 3. セリフとモノローグの傾向
 （軽口 vs 重い対話、ナレーション枠の多さ、心の声の比重、口調全体の指針。
-本文を厳密に指定するのではなく、**speech_intent に出す発話意図・口調・間** の傾向を定める。exact_dialogue は扱わない）
+本文の傾向（軽口 vs 重い、丁寧 vs 砕け）と、ナレーション枠 / 心の声 / 通常会話の使い分け指針を書く。PageBeat 層がこれを踏まえて **短い verbatim セリフ** を生成する）
 ```
 
 **Visual sections (4〜9)**: style_ref / Character sheet / Location sheet / PageRender が用途に応じてサブセットを使う。
@@ -480,7 +480,7 @@ continuity_note: 前ページから時間連続、朝日が差してきた
 **Emotion**: 決意
 
 **Speech**:
-- [alice / inner_monologue / 静かなモノローグ] 今日こそ告げると静かに決意する気持ち
+- [alice / inner_monologue / 静か] 今日こそ、ちゃんと言う。
 
 **SFX**:
 - ヒュウ (風)
@@ -493,7 +493,7 @@ continuity_note: 前ページから時間連続、朝日が差してきた
 **Emotion**: 不意の登場
 
 **Speech**:
-- [bob / dialogue / 落ち着いた声] アリスに気づき名前を呼びかける、穏やかさと驚きの混じった感情
+- [bob / dialogue / 落ち着いた] アリス。
 
 **SFX**:
 - ガチャ (ドアが開く音)
@@ -506,7 +506,7 @@ continuity_note: 前ページから時間連続、朝日が差してきた
 **Emotion**: 驚きと動揺
 
 **Speech**:
-- [alice / dialogue / 驚き、震えた声] ボブの名前を呼び返しながら、なぜここにいるのかと問いたい困惑
+- [alice / dialogue / 震え] ボ……ボブ、なんでここに。
 
 **SFX**: なし
 ```
@@ -558,13 +558,16 @@ continuity_note: 前ページから時間連続、朝日が差してきた
 #### Speech 行のフォーマット
 
 ```
-- [{speaker_id} / {bubble_type} / {register}] {intent}
+- [{speaker_id} / {bubble_type} / {register}] {text}
 ```
 
 - `speaker_id`: Character 層で定義済みの ID、または `narrator`（ナレーション）
 - `bubble_type`: enum (下記)
 - `register`: 口調のトーン（自由テキスト、例: 「怒り」「震え」「無感情」「ささやき」）
-- `intent`: 何を伝えたいかの意味記述。**実際のセリフ文字列ではない**。目安 40〜120 字
+- `text`: **吹き出しに描画される実セリフ文字列**。短く口語的に、30 文字以内。`"..."` や `「...」` で囲んでも可（parser が strip する）
+- 1 panel あたり Speech は **最大 2 個**（dialogue / inner_monologue / narration 合算）。テンポを優先し、本当に必要な発話だけを残す
+
+> **設計変更（PoC 2026-05-24）**: 当初は `intent`（意味記述）を渡して画像モデルにセリフを翻訳させる設計だったが、PoC で「意味記述まで律儀に画に書く」「短いセリフは正確に書ける」と分かったので **`text`（verbatim 短セリフ）方式に切り替えた**。詳細は `docs/PLAN.md` PoC ノート参照。
 
 ```
 Speech がない panel:
@@ -643,7 +646,7 @@ continuity_note: 前ページの言い争いの直後。沈黙の余韻
 **Emotion**: 気まずい静寂
 
 **Speech**:
-- [narrator / narration / 落ち着いたナレーション] 前ページの言い争いから時間が経ち、誰も口を開かない沈黙が続いている、という状況描写
+- [narrator / narration / 静か] 言い争いから、もう一時間。
 
 **SFX**:
 - カチ……コチ (時計の音)
@@ -667,7 +670,7 @@ continuity_note: 前ページの言い争いの直後。沈黙の余韻
 **Emotion**: 決意
 
 **Speech**:
-- [bob / dialogue / 静かだが芯のある声] アリスに謝罪したいという思いを、覚悟をもって切り出す気持ち
+- [bob / dialogue / 静か] アリス、あのさ……。
 
 **SFX**: なし
 
@@ -691,7 +694,7 @@ continuity_note: 前ページの言い争いの直後。沈黙の余韻
 **Emotion**: 気遣い、退場の予感
 
 **Speech**:
-- [mio / inner_monologue / 優しい独白] 邪魔しないようにそっと外すという気持ち
+- [mio / inner_monologue / 優しい] ここは、いない方がいい。
 
 **SFX**:
 - スッ (本を閉じる)
@@ -762,8 +765,8 @@ def build_page_prompt(
             parts.append(f"  カメラ: {panel.camera}")
         parts.append(f"  感情: {panel.emotion}")
         for sp in panel.speech_intents:
-            parts.append(f"  発話: {speaker_label(state, sp.speaker_id)} が{bubble_label(sp.bubble_type)}で発話 "
-                         f"(口調: {sp.register})。内容の意図: {sp.intent}")
+            parts.append(f"  セリフ: {speaker_label(state, sp.speaker_id)} が{bubble_label(sp.bubble_type)}で発話 "
+                         f"(口調: {sp.register})。文字:「{sp.text}」")
         for fx in panel.sfx:
             parts.append(f"  効果音: 「{fx.text}」（{fx.role}）")
         parts.append("")

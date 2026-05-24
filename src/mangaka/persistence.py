@@ -129,7 +129,7 @@ def _serialize(state: MangaState) -> dict[str, Any]:
                                 {
                                     "speaker_id": si.speaker_id,
                                     "bubble_type": si.bubble_type,
-                                    "intent": si.intent,
+                                    "text": si.text,
                                     "register": si.register,
                                 }
                                 for si in panel.speech_intents
@@ -252,7 +252,7 @@ def _deserialize(data: dict[str, Any]) -> MangaState:
                             SpeechIntent(
                                 speaker_id=cast("str", si["speaker_id"]),
                                 bubble_type=cast("str", si["bubble_type"]),
-                                intent=cast("str", si["intent"]),
+                                text=cast("str", si["text"]),
                                 register=cast("str | None", si.get("register")),
                             )
                             for si in si_data

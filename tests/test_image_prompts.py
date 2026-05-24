@@ -112,7 +112,7 @@ def _beat(page_number: int = 1, character_ids: list[str] | None = None) -> PageB
                     SpeechIntent(
                         speaker_id="alice",
                         bubble_type="inner_monologue",
-                        intent="決意の心情",
+                        text="やる、絶対に。",
                         register="静か",
                     ),
                 ],
@@ -128,7 +128,7 @@ def _beat(page_number: int = 1, character_ids: list[str] | None = None) -> PageB
                     SpeechIntent(
                         speaker_id="narrator",
                         bubble_type="narration",
-                        intent="場面転換のナレーション",
+                        text="夜明け前——。",
                         register=None,
                     ),
                 ],
@@ -224,7 +224,13 @@ def test_build_page_prompt_happy_path(tmp_path: Path) -> None:
     assert "【参照画像の構成】" in prompt
     assert "1 枚目: スタイル参照画" in prompt
     assert "【絵柄と演出】" in prompt
-    assert "【避けること】" in prompt
+    assert "【文字について】" in prompt
+    # 禁止事項 (section 10) is excluded from the page_render section set —
+    # it added noise without helping image quality during the PoC.
+    assert "禁止事項" not in prompt
+    assert "写実シェーディング禁止" not in prompt
+    # Page-render-side 【避けること】 was dropped at the same time.
+    assert "【避けること】" not in prompt
 
 
 def test_build_page_prompt_narrator_renders_as_japanese_label(tmp_path: Path) -> None:

@@ -1,6 +1,8 @@
 あなたは漫画のネーム作家です。これから示す情報をもとに、**1 ページ分の PageBeat** を Markdown + YAML frontmatter で書いてください。
 
-PageBeat はページ画像を生成する直前の指示書です。**実際のセリフ文字列は書かず**、`speech_intent`（何を伝えたいか）と `register`（口調のトーン）のみを書きます。文字描画は画像生成モデルが担当します。
+PageBeat はページ画像を生成する直前の指示書です。**実際の短いセリフ文字列** を Speech 行に直接書きます。画像生成モデルはこのセリフをそのまま吹き出しに描画します。
+
+セリフは **短く・口語的に・1 セリフ 30 文字以内** に抑えてください（吹き出しに収まるように）。長い説明はナレーション枠を使い、それも 30 文字以内に。1 コマあたり Speech は最大 2 個まで（声と心の声合わせて）。
 
 # Input: MPBV (final)
 
@@ -52,11 +54,12 @@ PageBeat はページ画像を生成する直前の指示書です。**実際の
 - `character_ids` は上のキャラ ID から **主要度順**に選択（このページで実際に登場するキャラだけ。最低 1 人）
 - panel 数は **1〜{{ max_panels_per_page }}**、`panel_no` は 1 から連番
 - 各 Panel は `Visual`（必須）と `Emotion`（必須）を含むこと
-- Speech 行のフォーマット: `- [speaker_id / bubble_type / register] intent`
+- Speech 行のフォーマット: `- [speaker_id / bubble_type / register] text`
   - `speaker_id`: Character ID または予約語 `narrator`
   - `bubble_type`: `dialogue` / `inner_monologue` / `narration` / `shout` のいずれか
   - `register`: 口調のトーン（例: 「怒り」「震え」「無感情」「ささやき」）
-  - `intent`: 何を伝えたいかの意味記述。**実際のセリフ文字列ではない**
+  - `text`: **実際に吹き出しに描画される短いセリフ文字列**（30 文字以内、口語的、句点不要）。「〜という意図」「〜的なニュアンス」のような meta 記述は禁止。`「」` や `"` で囲む必要はない
+- 1 コマあたり Speech は **最大 2 個**（dialogue, inner_monologue, narration を合算して）。テンポを優先し、本当に必要な発話だけを残す
 - SFX 行のフォーマット: `- text (role)`（例: `- ヒュウ (風)`）
 - Speech / SFX が無い panel は `**Speech**: なし` / `**SFX**: なし` と書く
 
@@ -82,7 +85,7 @@ continuity_note: （前ページとの繋ぎ・時間・状況の説明、不要
 **Emotion**: （このコマの感情トーン）
 
 **Speech**:
-- [{{ primary_character_id }} / inner_monologue / 静か] （話者の心情・意図を意味記述）
+- [{{ primary_character_id }} / inner_monologue / 静か] 短い実セリフ文字列（30字以内）
 
 **SFX**:
 - （擬音）（音の種類）

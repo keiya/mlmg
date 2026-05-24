@@ -99,10 +99,10 @@ _FIELD_RE = re.compile(
     re.MULTILINE | re.DOTALL,
 )
 
-# Speech: `- [speaker / bubble_type / register] intent`
+# Speech: `- [speaker / bubble_type / register] text`
 _SPEECH_RE = re.compile(
     r"^-\s*\[\s*(?P<speaker>[^/\]]+?)\s*/\s*(?P<bubble>[^/\]]+?)\s*/\s*"
-    r"(?P<register>[^/\]]*?)\s*\]\s*(?P<intent>.+?)\s*$",
+    r"(?P<register>[^/\]]*?)\s*\]\s*(?P<text>.+?)\s*$",
     re.MULTILINE,
 )
 
@@ -150,11 +150,18 @@ def _parse_speech_block(body: str) -> list[SpeechIntent]:
     speeches: list[SpeechIntent] = []
     for m in _SPEECH_RE.finditer(body):
         register_raw = m.group("register").strip()
+        # Tolerate `"..."` or `「...」` wrapping the dialogue.
+        raw_text = m.group("text").strip()
+        if len(raw_text) >= 2 and (
+            raw_text[0] == raw_text[-1] == '"'
+            or (raw_text[0] == "「" and raw_text[-1] == "」")
+        ):
+            raw_text = raw_text[1:-1]
         speeches.append(
             SpeechIntent(
                 speaker_id=m.group("speaker").strip(),
                 bubble_type=m.group("bubble").strip(),
-                intent=m.group("intent").strip(),
+                text=raw_text,
                 register=register_raw or None,
             )
         )

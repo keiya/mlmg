@@ -80,9 +80,9 @@ def _panel_lines(state: MangaState, page_beat: PageBeat) -> list[str]:
         for sp in panel.speech_intents:
             register = f"、口調: {sp.register}" if sp.register else ""
             lines.append(
-                f"  発話: {_speaker_label(state, sp.speaker_id)} が"
+                f"  セリフ: {_speaker_label(state, sp.speaker_id)} が"
                 f"{_bubble_label(sp.bubble_type)}で発話"
-                f"{register}。内容の意図: {sp.intent}"
+                f"{register}。文字:「{sp.text}」"
             )
         for fx in panel.sfx:
             lines.append(f"  効果音: 「{fx.text}」（{fx.role}）")
@@ -185,21 +185,13 @@ def build_page_prompt(
 
     parts.append("【文字について】")
     parts.append(
-        "吹き出し・ナレーション枠・効果音文字は、漫画として自然な"
-        "「雰囲気のある日本語」で描いてください。"
+        "「セリフ」「効果音」で指定された文字は、吹き出し・ナレーション枠・"
+        "効果音文字として、そのまま正確な日本語で描いてください。"
     )
     parts.append(
-        "正確な文章の再現は不要です。発話の意図と感情が伝わる言葉を選んでください。"
+        "吹き出しは必ず話者の口元から伸ばすこと。発話者と聞き手の位置関係を"
+        "コマの構図で明示してください。"
     )
-    parts.append(
-        "読みやすさより、表情・構図・コマ割りのテンポを優先してください。"
-    )
-    parts.append("")
-
-    parts.append("【避けること】")
-    parts.append("- 正確な文章再現にこだわって絵の質を落とすこと")
-    parts.append("- コマ割りの読み順を破ること")
-    parts.append("- 写実すぎる影付けや 3D っぽいレンダリング")
 
     prompt = "\n".join(parts)
 

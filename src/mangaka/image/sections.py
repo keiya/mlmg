@@ -19,7 +19,7 @@ SECTION_SETS: dict[str, list[int]] = {
     "character_sheet": [4, 5, 6, 7, 10],
     "location_sheet":  [4, 5, 6, 8, 10],
     "page_beat":       [1, 2, 3, 9, 10],
-    "page_render":     [4, 5, 6, 9, 10],
+    "page_render":     [4, 5, 6, 9],
 }
 
 # Tolerant section header pattern: `## N` or `## N.` or `## N something`.
