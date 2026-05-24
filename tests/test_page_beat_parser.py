@@ -284,13 +284,15 @@ def test_validate_unknown_speaker_id_fails() -> None:
     assert "unknown speaker_id" in result.failure().message
 
 
-def test_validate_speaker_must_be_in_page_character_ids_not_global() -> None:
-    """Round-2 review fix: speech speakers limited to THIS page's character_ids.
+def test_validate_speaker_globally_known_passes_even_if_omitted_from_frontmatter() -> None:
+    """PoC 2026-05-24: relaxed from strict "speakers ⊆ fm.character_ids"
+    because the page_beat LLM commonly forgets to update frontmatter when it
+    references a cameo character in Speech. The validator now accepts any
+    globally-known speaker; `_to_domain_page_beat` (layer side) augments
+    `PageBeat.character_ids` so page_render still pulls the right sheet.
 
-    Bob is a globally-known character but isn't listed in this page's
-    `character_ids: [alice]`. PageRender only pulls refs for the page's
-    character_ids, so a speaker outside that list ends up drawn without a
-    matching ref image — must fail validation.
+    Bob is a globally-known character. He's used in Panel 1 Speech but not
+    listed in `character_ids: [alice]`. Validator MUST accept.
     """
     md = textwrap.dedent(
         """\
@@ -311,11 +313,36 @@ def test_validate_speaker_must_be_in_page_character_ids_not_global() -> None:
         - [bob / dialogue / 普通] alice の知らないところでbob が話す
         """
     )
-    # bob is in known_character_ids but NOT in this page's frontmatter.
+    result = _validate(md)
+    assert isinstance(result, Success)
+
+
+def test_validate_speaker_globally_unknown_still_fails() -> None:
+    """The relaxation only allows speakers in the GLOBAL roster. A truly
+    unknown speaker (LLM hallucination) is still rejected."""
+    md = textwrap.dedent(
+        """\
+        ---
+        page_number: 1
+        phase: 起
+        location_id: rooftop
+        character_ids: [alice]
+        mood: 静か
+        ---
+
+        ## Panel 1
+
+        **Visual**: x
+        **Emotion**: y
+
+        **Speech**:
+        - [charlie / dialogue / 普通] charlie は global にも存在しない
+        """
+    )
     result = _validate(md)
     assert isinstance(result, Failure)
     assert "unknown speaker_id" in result.failure().message
-    assert "bob" in result.failure().message
+    assert "charlie" in result.failure().message
 
 
 def test_validate_narrator_speaker_accepted() -> None:
@@ -500,24 +527,27 @@ def test_validate_location_must_equal_expected_outline_location() -> None:
     assert "location_id" in result.failure().message
 
 
-def test_validate_characters_must_be_subset_of_expected() -> None:
-    """character_ids may be a subset (a page may legitimately omit a
-    less-prominent character from the outline), but cannot introduce
-    characters absent from the outline.
+def test_validate_characters_may_extend_page_plan_hint() -> None:
+    """PageBeat is allowed to introduce characters NOT in PagePlan's per-page
+    outline, as long as they exist in the global character roster. The
+    PagePlan list is treated as an advisory hint, not a strict subset
+    constraint — see comment in validate_page_beat. Earlier (M4) we enforced
+    strict subset, but the PoC found this creates a parse-retry deadlock when
+    the LLM legitimately adds cameo / background / foreshadowing characters.
     """
     parsed = parse_page_beat_text(_VALID_MD)
     assert isinstance(parsed, Success)
-    # _VALID_MD has character_ids=[alice, bob]; expect only [alice].
+    # _VALID_MD has character_ids=[alice, bob]; PagePlan hint is only [alice].
+    # Validator must NOT fail — bob is a legitimate extension.
     result = validate_page_beat(
         parsed.unwrap(),
         known_character_ids=["alice", "bob"],
         known_location_ids=["rooftop_morning"],
         expected_page_number=None,
         max_panels_per_page=8,
-        expected_character_ids=["alice"],  # bob is "extra"
+        expected_character_ids=["alice"],  # bob is "extra" but allowed
     )
-    assert isinstance(result, Failure)
-    assert "extras=['bob']" in result.failure().message
+    assert isinstance(result, Success)
 
 
 def test_validate_phase_in_arc_passes() -> None:

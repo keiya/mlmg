@@ -97,11 +97,27 @@ def _to_domain_page_beat(
             )
         )
 
+    # Auto-augment `character_ids` with any Speech speakers the LLM put in
+    # panels but forgot to list in frontmatter. The validator (now relaxed)
+    # accepts any global character as a speaker; here we make sure the
+    # PageBeat's `character_ids` covers all of them so `build_refs` picks
+    # up the right character sheets. Reserved IDs (narrator etc.) are
+    # excluded — they're not real characters.
+    from mangaka.parse.page_beat import SPEAKER_RESERVED_IDS
+
+    augmented = list(fm.character_ids)
+    seen = set(augmented)
+    for p in parsed.panels:
+        for sp in p.speech_intents:
+            if sp.speaker_id not in seen and sp.speaker_id not in SPEAKER_RESERVED_IDS:
+                augmented.append(sp.speaker_id)
+                seen.add(sp.speaker_id)
+
     return PageBeat(
         page_number=fm.page_number,
         phase=fm.phase,
         location_id=fm.location_id,
-        character_ids=list(fm.character_ids),
+        character_ids=augmented,
         mood=fm.mood,
         continuity_note=fm.continuity_note,
         panels=panels,

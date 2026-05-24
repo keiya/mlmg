@@ -490,28 +490,33 @@ def validate_page_beat(
                 ),
             )
         )
-    if expected_character_ids is not None:
-        expected_set = set(expected_character_ids)
-        # `frontmatter.character_ids` validated above to be a non-empty list.
-        assert fm.character_ids is not None
-        actual_set = set(fm.character_ids)
-        if not actual_set.issubset(expected_set):
-            extras = sorted(actual_set - expected_set)
-            return Failure(
-                MangaError(
-                    kind=ErrorKind.VALIDATION_FAILED,
-                    message=(
-                        f"PageBeat character_ids={sorted(actual_set)} contain "
-                        f"characters not in PagePlan outline "
-                        f"character_ids={sorted(expected_set)}: extras={extras}"
-                    ),
-                )
-            )
+    # Note: `expected_character_ids` (the PagePlan per-page list) is treated as
+    # an **advisory hint**, not a strict subset constraint. Previously we
+    # enforced PageBeat.character_ids ⊆ PagePlan.outline.character_ids, but PoC
+    # runs showed this creates a deadlock: the PageBeat LLM naturally introduces
+    # cameo / background / foreshadowing characters not listed for that page in
+    # PagePlan, the validator rejects, the parse_with_retry loop oscillates
+    # between "remove from Speech" and "add to frontmatter" without resolution.
+    # The global existence check (known_character_ids, above at _validate_frontmatter)
+    # is the real safety net — anything in fm.character_ids was already confirmed
+    # to be a real character. The PagePlan per-page char list stays useful as a
+    # hint to PageBeat's LLM prompt and to page_render's ref ordering, but is
+    # not enforced at the validator level.
+    _ = expected_character_ids  # kept in signature for caller API stability
 
     assert fm.character_ids is not None
+    # Panel speakers checked against the GLOBAL roster (was: against
+    # `fm.character_ids` alone). The earlier strict check caused a
+    # parse-retry deadlock when the LLM legitimately referenced a cameo
+    # character in Speech without listing them in frontmatter — the
+    # validator rejected, the LLM bounced between "remove from Speech"
+    # and "size_hint=small" type fixes, and the run died. The
+    # `_to_domain_page_beat` step in `layers/page_beat.py` now auto-
+    # augments `PageBeat.character_ids` with any panel speakers, so
+    # page_render's ref builder still picks up the right char sheet.
     return _validate_panels(
         parsed.panels,
-        page_character_ids=set(fm.character_ids),
+        page_character_ids=set(known_character_ids),
         max_panels_per_page=max_panels_per_page,
     )
 
