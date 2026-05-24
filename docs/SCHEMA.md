@@ -565,7 +565,7 @@ continuity_note: 前ページから時間連続、朝日が差してきた
 - `bubble_type`: enum (下記)
 - `register`: 口調のトーン（自由テキスト、例: 「怒り」「震え」「無感情」「ささやき」）
 - `text`: **吹き出しに描画される実セリフ文字列**。短く口語的に、30 文字以内。`"..."` や `「...」` で囲んでも可（parser が strip する）
-- 1 panel あたり Speech は **最大 2 個**（dialogue / inner_monologue / narration 合算）。テンポを優先し、本当に必要な発話だけを残す
+- Speech 数に上限なし。コマの感情密度に応じて自由。`narration` は場面説明・時間経過・心情の exposition に使い、`dialogue` / `inner_monologue` と budget を分けて運用する
 
 > **設計変更（PoC 2026-05-24）**: 当初は `intent`（意味記述）を渡して画像モデルにセリフを翻訳させる設計だったが、PoC で「意味記述まで律儀に画に書く」「短いセリフは正確に書ける」と分かったので **`text`（verbatim 短セリフ）方式に切り替えた**。詳細は `docs/PLAN.md` PoC ノート参照。
 
@@ -901,8 +901,8 @@ def build_refs(
     state,
     page_beat,
     *,
-    max_refs: int = 16,
-    include_prev: bool = True,
+    max_refs: int,
+    include_prev: bool,  # config default flipped to False after 2026-05-24 PoC
 ) -> list[LabeledRef]:
     refs: list[LabeledRef] = []
 

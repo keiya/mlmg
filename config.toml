@@ -37,7 +37,7 @@ location_sheets_per_loc = 1
 
 [image]
 max_refs_per_page = 16
-include_prev_page_ref = true
+include_prev_page_ref = false
 max_prompt_chars = 20000
 warn_prompt_chars = 12000
 max_location_summary_chars = 600

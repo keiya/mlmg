@@ -89,7 +89,14 @@ class ImageBudgetConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
     max_refs_per_page: int = Field(default=16, ge=2, le=16)
-    include_prev_page_ref: bool = True
+    # Default flipped to False after the 8-page PoC (2026-05-24). Including
+    # the previous page as a ref produced visible "loop" artifacts — adjacent
+    # pages copied panel layout, character poses, and bubble positions from
+    # the prior page. Style / character / location consistency are already
+    # carried by style.png + char sheets + location sheets, so the prev-page
+    # ref was over-engineering. As a bonus, with no inter-page dependency,
+    # page renders are now embarrassingly parallel — see PLAN.md.
+    include_prev_page_ref: bool = False
     max_prompt_chars: int = Field(default=20000, ge=1)
     warn_prompt_chars: int = Field(default=12000, ge=1)
     max_location_summary_chars: int = Field(default=600, ge=1)

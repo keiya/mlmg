@@ -207,6 +207,7 @@ Deliverable: 4 ページの A5 PDF が出力される。`runs/{name}/manga.pdf` 
   1. **プロンプト修正**: 「同じ施設のアングル違いは別ロケとして扱わない。アングル指定は PageBeat の camera フィールドで行う」を明示。1 location = 1 canonical 設定画を強制
   2. **Location-edit feature (v2 候補)**: 時間帯/季節バリアントを残したい場合、`img.edit(prompt, base=canonical_loc.png, refs=[style.png])` で canonical から派生させて整合性を担保。location 層の API 変更を要するので別 milestone
   さらに post-parse validation で「N 個の location が同じ prefix を共有する場合に warn」を追加すると過剰分裂を検出できる
+- **Page render の並列化 (PoC 2026-05-24 8 ページ run で発覚)**: 8 ページ PoC で page_render に ~25 分かかった (sequential)。当初は `include_prev_page_ref = true` で各ページが前ページ画像を ref に取っていたためページ間 dependency があったが、PoC の結果 prev_page_ref はループ感を悪化させるだけで品質に貢献していないと判明し、`include_prev_page_ref = false` をデフォルト化した（同コミット）。これで **page render は embarrassingly parallel** になった。M5 か M6 で `page_render.py` を `asyncio.gather` or `concurrent.futures.ThreadPoolExecutor(max_workers=4)` で並列化すれば 8 ページが ~5 分台で完走するはず（OpenAI Image API の rate limit に注意、tier 4 で 200 image req/min 程度）。state checkpoint は各 page 完了時の点で行えば、部分失敗時の recovery も維持できる
 
 Deliverable: `mangaka run "seed"` で end-to-end の短編漫画 PDF が出る。inject 5 種類で気に入らない部分だけリテイクできる。`mangaka status` で累計コストが見える。
 

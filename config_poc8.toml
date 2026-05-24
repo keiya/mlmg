@@ -1,5 +1,6 @@
-# PoC config — 4-page short for first end-to-end run.
-# Differs from config.toml only in limits.max_pages.
+# PoC config — 8-page short for end-to-end pipeline verification.
+# Same as config_poc.toml except max_pages=8, max_main_characters/locations
+# tightened to encourage consolidation per prompt fix in 8b9923d.
 
 [general]
 language = "ja"
@@ -22,11 +23,11 @@ image_format = "jpeg"
 jpeg_quality = 85
 
 [limits]
-max_pages = 4
+max_pages = 8
 max_arc_phases = 5
 max_panels_per_page = 8
-max_main_characters = 8
-max_locations = 6
+max_main_characters = 4
+max_locations = 3
 max_retries = 3
 max_image_retries = 2
 max_parse_retries = 2
