@@ -20,27 +20,25 @@ def main() -> int:
     latest = latest_state_path(run_dir).unwrap()
     state = load_state(latest).unwrap()
 
-    if state.pages is None:
-        print("no pages in state", file=sys.stderr)
+    if state.page_plan is None:
+        print("state has no page_plan", file=sys.stderr)
         return 1
 
-    for page in sorted(state.pages, key=lambda p: p.beat.page_number if p.beat else 0):
-        if page.beat is None:
-            continue
+    for outline in sorted(state.page_plan.page_outline, key=lambda o: o.page_number):
         refs = build_refs(
             state,
-            page.beat,
+            outline,
             max_refs=config.image.max_refs_per_page,
             include_prev=config.image.include_prev_page_ref,
         )
-        prompt_result = build_page_prompt(state, page.beat, refs, config)
+        prompt_result = build_page_prompt(state, outline, refs, config)
         if isinstance(prompt_result, Failure):
-            print(f"page {page.beat.page_number}: BUILD FAILED: {prompt_result.failure().message}")
+            print(f"page {outline.page_number}: BUILD FAILED: {prompt_result.failure().message}")
             continue
         prompt = prompt_result.unwrap()
-        out = run_dir / f"prompt_page_{page.beat.page_number:03d}.txt"
+        out = run_dir / f"prompt_page_{outline.page_number:03d}.txt"
         out.write_text(prompt, encoding="utf-8")
-        print(f"page {page.beat.page_number}: {len(prompt)} chars → {out}")
+        print(f"page {outline.page_number}: {len(prompt)} chars → {out}")
     return 0
 
 

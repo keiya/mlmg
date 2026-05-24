@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from mangaka.domain import MangaState, PageBeat
+from mangaka.domain import MangaState, PageOutline
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,7 @@ class LabeledRef:
 
 def build_refs(
     state: MangaState,
-    page_beat: PageBeat,
+    page_outline: PageOutline,
     *,
     max_refs: int,
     include_prev: bool,
@@ -41,8 +41,8 @@ def build_refs(
 
     Caller responsibilities (NOT re-checked here):
       - `state.stylist` is not None
-      - `page_beat.location_id` exists in `state.locations_by_id`
-      - every `page_beat.character_ids` exists in `state.characters_by_id`
+      - `page_outline.location_id` exists in `state.locations_by_id`
+      - every `page_outline.character_ids` exists in `state.characters_by_id`
       - `max_refs >= 2` (enforced by `ImageBudgetConfig` validator)
     """
     assert state.stylist is not None
@@ -54,7 +54,7 @@ def build_refs(
     )
 
     # 2. location sheet.
-    loc = state.locations_by_id[page_beat.location_id]
+    loc = state.locations_by_id[page_outline.location_id]
     refs.append(
         LabeledRef(
             path=loc.sheet_path,
@@ -62,13 +62,9 @@ def build_refs(
         )
     )
 
-    # 3. previous page (page_number - 1 lookup, NOT state.pages[-1] — inject
-    #    paths reorder state.pages). Skipped silently if `max_refs` is so
-    #    tight that the prev slot would push the reserved-slots count over
-    #    budget — otherwise a valid `max_refs=2 + include_prev=true` config
-    #    would crash on page 2+. style + loc are the absolute floor; prev
-    #    yields to them when space is too tight.
-    prev_page = state.pages_by_number.get(page_beat.page_number - 1)
+    # 3. previous page (default OFF after PoC 2026-05-24 — see config.py).
+    #    style + loc are the absolute floor; prev yields when space is tight.
+    prev_page = state.pages_by_number.get(page_outline.page_number - 1)
     if (
         include_prev
         and prev_page is not None
@@ -85,7 +81,7 @@ def build_refs(
     # 4. character sheets, character_ids order (= priority order), truncated.
     char_budget = max(0, max_refs - len(refs))
     char_refs: list[LabeledRef] = []
-    for char_id in page_beat.character_ids:
+    for char_id in page_outline.character_ids:
         char = state.characters_by_id[char_id]
         for sheet_path in char.sheet_paths:
             char_refs.append(

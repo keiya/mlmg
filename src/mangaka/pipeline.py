@@ -22,7 +22,6 @@ from mangaka.layers.backstory import generate_backstories
 from mangaka.layers.character import generate_character_layer
 from mangaka.layers.location import generate_location_layer
 from mangaka.layers.mpbv import generate_mpbv
-from mangaka.layers.page_beat import generate_page_beat_layer
 from mangaka.layers.page_plan import generate_page_plan
 from mangaka.layers.page_render import generate_page_render_layer
 from mangaka.layers.plot import generate_master_plot
@@ -46,7 +45,6 @@ class Until(StrEnum):
     CHARACTER = "character"
     LOCATION = "location"
     PAGE_PLAN = "page_plan"
-    PAGE_BEAT = "page_beat"
     PAGE_RENDER = "page_render"
 
 
@@ -59,7 +57,6 @@ _LAYER_ORDER: list[Until] = [
     Until.CHARACTER,
     Until.LOCATION,
     Until.PAGE_PLAN,
-    Until.PAGE_BEAT,
     Until.PAGE_RENDER,
 ]
 
@@ -106,10 +103,6 @@ _LAYERS: list[_LayerSpec] = [
                image_fn=generate_location_layer),
     _LayerSpec(name=Until.PAGE_PLAN, state_key="page_plan", needs_image=False,
                text_fn=generate_page_plan),
-    # page_beat doesn't actually use `img` but matches the image-layer Protocol
-    # so the orchestrator can pass `run_dir` (canonical .md persistence).
-    _LayerSpec(name=Until.PAGE_BEAT, state_key="page_beat", needs_image=True,
-               image_fn=generate_page_beat_layer),
     _LayerSpec(name=Until.PAGE_RENDER, state_key="page_render", needs_image=True,
                image_fn=generate_page_render_layer),
 ]

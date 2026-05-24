@@ -31,25 +31,25 @@ def main() -> int:
     latest = latest_state_path(run_dir).unwrap()
     state = load_state(latest).unwrap()
 
-    if state.pages is None:
-        print("no pages in state", file=sys.stderr)
+    if state.page_plan is None:
+        print("state has no page_plan", file=sys.stderr)
         return 1
 
-    page = next(
-        (p for p in state.pages if p.beat is not None and p.beat.page_number == page_number),
+    outline = next(
+        (o for o in state.page_plan.page_outline if o.page_number == page_number),
         None,
     )
-    if page is None or page.beat is None:
-        print(f"page {page_number} not found", file=sys.stderr)
+    if outline is None:
+        print(f"page_outline for {page_number} not found", file=sys.stderr)
         return 1
 
     refs = build_refs(
         state,
-        page.beat,
+        outline,
         max_refs=config.image.max_refs_per_page,
         include_prev=config.image.include_prev_page_ref,
     )
-    prompt_result = build_page_prompt(state, page.beat, refs, config)
+    prompt_result = build_page_prompt(state, outline, refs, config)
     if isinstance(prompt_result, Failure):
         print(f"prompt build failed: {prompt_result.failure().message}", file=sys.stderr)
         return 1
@@ -74,9 +74,8 @@ def main() -> int:
         return 1
     img_bytes = edit_result.unwrap()
     out = run_dir / "pages" / f"page_{page_number:03d}.png"
-    # If this is the first single-page render on a run that's only been through
-    # page_beat (no page_render layer yet), pages/ won't exist. Without mkdir
-    # the paid img.edit bytes get lost to FileNotFoundError.
+    # If this is the first single-page render on a run that hasn't been
+    # through page_render yet, pages/ won't exist.
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(img_bytes)
     print(f"✓ wrote {out} ({len(img_bytes)} bytes)")

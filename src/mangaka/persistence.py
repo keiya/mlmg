@@ -19,7 +19,6 @@ from typing import Any, cast
 
 from mangaka.domain import (
     MPBV,
-    SFX,
     ArcPhase,
     Backstories,
     Character,
@@ -27,11 +26,8 @@ from mangaka.domain import (
     MangaState,
     MasterPlot,
     Page,
-    PageBeat,
     PageOutline,
     PagePlan,
-    Panel,
-    SpeechIntent,
     Stylist,
 )
 from mangaka.errors import ErrorKind, MangaError
@@ -52,10 +48,8 @@ LAYER_STATE_FILES: dict[str, str] = {
     "character": "state_05_character.json",
     "location": "state_06_location.json",
     "page_plan": "state_07_page_plan.json",
-    # PageBeat / PageRender persist the *aggregate* state (every page's path
-    # in `state.pages`); the per-page `state_08_page_beat_NN.json` granularity
-    # in ARCH is M5 territory and arrives with the inject CLI.
-    "page_beat": "state_08_page_beat.json",
+    # PageRender persists the *aggregate* state (every Page's image_path in
+    # `state.pages`). Per-page granularity will come with M5 inject CLI.
     "page_render": "state_09_page_render.json",
     "final": "state_final.json",
 }
@@ -110,37 +104,6 @@ def _serialize(state: MangaState) -> dict[str, Any]:
             {
                 "page_number": p.page_number,
                 "image_path": (str(p.image_path) if p.image_path is not None else None),
-                "beat": {
-                    "page_number": p.beat.page_number,
-                    "phase": p.beat.phase,
-                    "location_id": p.beat.location_id,
-                    "character_ids": list(p.beat.character_ids),
-                    "mood": p.beat.mood,
-                    "continuity_note": p.beat.continuity_note,
-                    "md_path": str(p.beat.md_path),
-                    "panels": [
-                        {
-                            "panel_no": panel.panel_no,
-                            "size_hint": panel.size_hint,
-                            "visual": panel.visual,
-                            "emotion": panel.emotion,
-                            "camera": panel.camera,
-                            "speech_intents": [
-                                {
-                                    "speaker_id": si.speaker_id,
-                                    "bubble_type": si.bubble_type,
-                                    "text": si.text,
-                                    "register": si.register,
-                                }
-                                for si in panel.speech_intents
-                            ],
-                            "sfx": [
-                                {"text": s.text, "role": s.role} for s in panel.sfx
-                            ],
-                        }
-                        for panel in p.beat.panels
-                    ],
-                },
             }
             for p in state.pages
         ]
@@ -233,58 +196,10 @@ def _deserialize(data: dict[str, Any]) -> MangaState:
         pages_data = cast("list[dict[str, Any]]", data["pages"])
         pages: list[Page] = []
         for p_data in pages_data:
-            beat_data = cast("dict[str, Any]", p_data["beat"])
-            panels_data = cast("list[dict[str, Any]]", beat_data["panels"])
-            panels: list[Panel] = []
-            for panel_d in panels_data:
-                si_data = cast(
-                    "list[dict[str, Any]]", panel_d["speech_intents"]
-                )
-                sfx_data = cast("list[dict[str, Any]]", panel_d["sfx"])
-                panels.append(
-                    Panel(
-                        panel_no=cast("int", panel_d["panel_no"]),
-                        size_hint=cast("str", panel_d["size_hint"]),
-                        visual=cast("str", panel_d["visual"]),
-                        emotion=cast("str", panel_d["emotion"]),
-                        camera=cast("str | None", panel_d["camera"]),
-                        speech_intents=[
-                            SpeechIntent(
-                                speaker_id=cast("str", si["speaker_id"]),
-                                bubble_type=cast("str", si["bubble_type"]),
-                                # Pre-53c4be4 state JSONs persisted this field as
-                                # `intent` (meaning description) before the schema
-                                # was redefined as verbatim short dialogue. Accept
-                                # either key so existing runs stay loadable.
-                                text=cast("str", si.get("text") or si["intent"]),
-                                register=cast("str | None", si.get("register")),
-                            )
-                            for si in si_data
-                        ],
-                        sfx=[
-                            SFX(
-                                text=cast("str", s["text"]),
-                                role=cast("str", s["role"]),
-                            )
-                            for s in sfx_data
-                        ],
-                    )
-                )
-            page_beat_obj = PageBeat(
-                page_number=cast("int", beat_data["page_number"]),
-                phase=cast("str", beat_data["phase"]),
-                location_id=cast("str", beat_data["location_id"]),
-                character_ids=list(cast("list[str]", beat_data["character_ids"])),
-                mood=cast("str", beat_data["mood"]),
-                continuity_note=cast("str | None", beat_data.get("continuity_note")),
-                panels=panels,
-                md_path=Path(cast("str", beat_data["md_path"])),
-            )
             image_path_raw = p_data.get("image_path")
             pages.append(
                 Page(
                     page_number=cast("int", p_data["page_number"]),
-                    beat=page_beat_obj,
                     image_path=Path(cast("str", image_path_raw))
                     if image_path_raw is not None
                     else None,

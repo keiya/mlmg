@@ -1,15 +1,21 @@
 """PageRender prompt assembly.
 
-`build_page_prompt(state, page_beat, labeled_refs, config) -> Result[str, MangaError]`
-is the single entrypoint. It pulls Stylist sections, formats panels into
-Japanese natural-language directives, enforces character / location summary
-budgets, and hard-fails if the prompt exceeds `image.max_prompt_chars`.
+`build_page_prompt(state, page_outline, labeled_refs, config) -> Result[str, MangaError]`
+is the single entrypoint. It pulls MPBV story overview + PagePlan arc context +
+the per-page outline summary + stylist sections, then asks gpt-image-2 to
+compose the page (panel layout / camera / speech / narration) on its own.
+
+> **Design note (PoC 2026-05-24)**: this used to receive a `PageBeat` with
+> structured per-panel directives. PoC found the model produces stronger
+> narrative pages when given the page_outline summary directly and trusted to
+> handle the manga craft itself. PageBeat layer was removed; see
+> `docs/ARCHITECTURE.md` 設計の進化 for details.
 """
 
 from __future__ import annotations
 
 from mangaka.config import MangakaConfig
-from mangaka.domain import MangaState, PageBeat
+from mangaka.domain import MangaState, PageOutline
 from mangaka.errors import ErrorKind, MangaError
 from mangaka.image.ref_builder import LabeledRef
 from mangaka.image.sections import SECTION_SETS, extract_sections
@@ -18,34 +24,6 @@ from mangaka.parse.sections import extract_subsection
 from mangaka.result import Failure, Result, Success
 
 logger = get_logger(__name__)
-
-
-_SIZE_LABELS: dict[str, str] = {
-    "regular": "標準サイズ",
-    "large": "キメゴマ・大ゴマ",
-    "wide": "横長の広いコマ",
-}
-_BUBBLE_LABELS: dict[str, str] = {
-    "dialogue": "通常の吹き出し",
-    "inner_monologue": "心の声（雲形か角バルーン）",
-    "narration": "ナレーション枠（四角枠）",
-    "shout": "叫びの吹き出し（爆発型）",
-}
-
-
-def _size_label(s: str) -> str:
-    return _SIZE_LABELS.get(s, s)
-
-
-def _bubble_label(b: str) -> str:
-    return _BUBBLE_LABELS.get(b, b)
-
-
-def _speaker_label(state: MangaState, speaker_id: str) -> str:
-    if speaker_id == "narrator":
-        return "ナレーション"
-    char = state.characters_by_id.get(speaker_id)
-    return char.name if char is not None else speaker_id
 
 
 def extract_visual_summary(description: str, *, max_chars: int) -> str:
@@ -59,44 +37,16 @@ def extract_visual_summary(description: str, *, max_chars: int) -> str:
     if not body:
         body = extract_subsection(description, "視覚的特徴")
     if not body:
-        # No structured subsection — use the whole description.
         body = description.strip()
 
     body = body.strip()
     if len(body) <= max_chars:
         return body
-    # Truncate; mark explicitly so the LLM understands content was clipped.
     return body[:max_chars].rstrip() + "…"
 
 
-def _panel_lines(state: MangaState, page_beat: PageBeat) -> list[str]:
-    lines: list[str] = []
-    for panel in page_beat.panels:
-        # No visible bullet marker — gpt-image-2 was rendering `■ コマ N` as a
-        # literal "1" / "2" label inside the panel. Plain text + colon is read
-        # as a directive header rather than a graphic element.
-        lines.append(
-            f"[Panel {panel.panel_no} / {_size_label(panel.size_hint)}]"
-        )
-        lines.append(f"  絵: {panel.visual}")
-        if panel.camera:
-            lines.append(f"  カメラ: {panel.camera}")
-        lines.append(f"  感情: {panel.emotion}")
-        for sp in panel.speech_intents:
-            register = f"、口調: {sp.register}" if sp.register else ""
-            lines.append(
-                f"  セリフ: {_speaker_label(state, sp.speaker_id)} が"
-                f"{_bubble_label(sp.bubble_type)}で発話"
-                f"{register}。文字:「{sp.text}」"
-            )
-        for fx in panel.sfx:
-            lines.append(f"  効果音: 「{fx.text}」（{fx.role}）")
-        lines.append("")
-    return lines
-
-
 def _character_block(
-    state: MangaState, page_beat: PageBeat, config: MangakaConfig
+    state: MangaState, page_outline: PageOutline, config: MangakaConfig
 ) -> list[str]:
     """Render `【登場人物】` lines, honoring per-char and total summary budgets."""
     per_char_max = config.image.max_character_summary_chars
@@ -104,7 +54,7 @@ def _character_block(
 
     lines: list[str] = ["【登場人物】"]
     used_chars = 0
-    for char_id in page_beat.character_ids:
+    for char_id in page_outline.character_ids:
         char = state.characters_by_id.get(char_id)
         if char is None:
             # Validated upstream; defensive only.
@@ -121,11 +71,11 @@ def _character_block(
 
 def build_page_prompt(
     state: MangaState,
-    page_beat: PageBeat,
+    page_outline: PageOutline,
     labeled_refs: list[LabeledRef],
     config: MangakaConfig,
 ) -> Result[str, MangaError]:
-    """Assemble the final Japanese prompt for a single page.
+    """Assemble the final Japanese prompt for a single page from PagePlan-level data.
 
     Returns `Failure(PROMPT_TOO_LONG)` if `len(prompt) > max_prompt_chars`.
     The orchestrator owns recovery; this function never silently truncates.
@@ -137,13 +87,27 @@ def build_page_prompt(
                 message="build_page_prompt requires state.stylist",
             )
         )
-    loc = state.locations_by_id.get(page_beat.location_id)
+    if state.mpbv is None:
+        return Failure(
+            MangaError(
+                kind=ErrorKind.MISSING_PREREQUISITE,
+                message="build_page_prompt requires state.mpbv",
+            )
+        )
+    if state.page_plan is None:
+        return Failure(
+            MangaError(
+                kind=ErrorKind.MISSING_PREREQUISITE,
+                message="build_page_prompt requires state.page_plan",
+            )
+        )
+    loc = state.locations_by_id.get(page_outline.location_id)
     if loc is None:
         return Failure(
             MangaError(
                 kind=ErrorKind.INVALID_STATE,
                 message=(
-                    f"page_beat.location_id={page_beat.location_id!r} "
+                    f"page_outline.location_id={page_outline.location_id!r} "
                     f"not in state.locations_by_id"
                 ),
             )
@@ -155,29 +119,31 @@ def build_page_prompt(
     parts.append("")
 
     # Story-level context: without this, gpt-image-2 composes each page in
-    # isolation. PoC 2026-05-24 showed the model couldn't convey arc-level
-    # meaning (e.g. "this is the redo of page 1") because it only saw the
-    # current page's mood + continuity_note. Pulling MPBV §1 (logline /
-    # theme / 異常性) and §2 (world rules) plus arc position gives the model
-    # the same whole-story context a manga assistant would have in mind.
-    # `extract_sections` takes first-match per section number, so we get
-    # the master-plot §1/§2 (not the worldbuilding ones that share numbers).
-    if state.mpbv is not None and state.page_plan is not None:
-        overview = extract_sections(state.mpbv.raw_markdown, [1, 2])
-        if overview.strip():
-            parts.append("【物語の全貌】")
-            parts.append(overview)
-            parts.append("")
-        arc_label = ""
-        for a in state.page_plan.arc:
-            if a.start_page <= page_beat.page_number <= a.end_page:
-                arc_label = f"phase「{a.phase}」({a.summary})"
-                break
-        parts.append(
-            f"【このページの位置】全 {state.page_plan.total_pages} ページ中、"
-            f"{page_beat.page_number} ページ目。{arc_label}"
-        )
+    # isolation. MPBV §1 (logline / theme / 異常性) + §2 (world rules) gives
+    # the model the whole-story context a manga assistant would have in mind.
+    overview = extract_sections(state.mpbv.raw_markdown, [1, 2])
+    if overview.strip():
+        parts.append("【物語の全貌】")
+        parts.append(overview)
         parts.append("")
+
+    # Arc position for this page.
+    arc_label = ""
+    for a in state.page_plan.arc:
+        if a.start_page <= page_outline.page_number <= a.end_page:
+            arc_label = f"phase「{a.phase}」({a.summary})"
+            break
+    parts.append(
+        f"【このページの位置】全 {state.page_plan.total_pages} ページ中、"
+        f"{page_outline.page_number} ページ目。{arc_label}"
+    )
+    parts.append("")
+
+    # The semantic core: PagePlan's per-page beat summary. gpt-image-2 uses
+    # this to reconstruct panel layout, narration, dialogue.
+    parts.append("【このページの骨格】 (PagePlan が決めた、このページに描くべきこと)")
+    parts.append(page_outline.summary)
+    parts.append("")
 
     parts.append("【場所】")
     parts.append(
@@ -187,45 +153,54 @@ def build_page_prompt(
     )
     parts.append("")
 
-    parts.extend(_character_block(state, page_beat, config))
-
-    parts.append("【このページの空気】")
-    parts.append(page_beat.mood)
-    if page_beat.continuity_note:
-        parts.append(page_beat.continuity_note)
-    parts.append("")
-
-    parts.append(
-        f"【コマ構成】{len(page_beat.panels)} コマで構成。右上から左下の読み順:"
-    )
-    parts.append("")
-    parts.extend(_panel_lines(state, page_beat))
+    parts.extend(_character_block(state, page_outline, config))
 
     parts.append("【参照画像の構成】")
     for idx, ref in enumerate(labeled_refs, start=1):
         parts.append(f"- {idx} 枚目: {ref.label}")
     parts.append("")
 
-    parts.append("【絵柄と演出】")
+    parts.append("【絵柄と演出】 (筆致・トーン・コマ運び方針)")
     parts.append("参照画像のスタイル参照画の絵柄に従ってください。")
     parts.append(
         extract_sections(state.stylist.raw_markdown, SECTION_SETS["page_render"])
     )
     parts.append("")
 
+    parts.append("【あなたが決めること】")
+    parts.append(
+        "- 5-8 コマのレイアウト・サイズ・読み順 (右上から左下)。"
+        "感情の山場には大コマ、繰り返し・テンポには標準コマを使い分け"
+    )
+    parts.append(
+        "- 各コマの構図・カメラアングル・キャラのポーズと表情。"
+        "上記「骨格」の感情と arc 位置を意識"
+    )
+    parts.append(
+        "- セリフ (吹き出し): 「骨格」に引用符で書かれた key dialogue は verbatim で使う。"
+        "それ以外は骨格に沿った自然な短いセリフを補う"
+    )
+    parts.append("- 心の声 (雲形バルーン): 主人公の重要な内省を必要に応じて")
+    parts.append(
+        "- ナレーション枠 (四角枠): 状況・時間経過・心情の exposition を積極的に。"
+        "「骨格」を読んでいない読者にもこのページで何が起きているか伝わるようにナレ枠で補完"
+    )
+    parts.append("- 効果音文字 (擬音): 環境音・動作音を適度に")
+    parts.append("")
+
     parts.append("【文字について】")
     parts.append(
-        "「セリフ」「効果音」で指定された文字は、吹き出し・ナレーション枠・"
-        "効果音文字として、そのまま正確な日本語で描いてください。"
+        "「セリフ」「効果音」で描く文字は、漫画として自然な日本語でそのまま正確に描いてください。"
+    )
+    parts.append("セリフは短く口語的に (1 セリフ 30 字以内)、ナレ枠は 60 字以内。")
+    parts.append(
+        "吹き出しは必ず話者の口元から伸ばす。発話者と聞き手の位置関係をコマの構図で明示。"
     )
     parts.append(
-        "吹き出しは必ず話者の口元から伸ばすこと。発話者と聞き手の位置関係を"
-        "コマの構図で明示してください。"
+        "1 ページ全体で 8-15 個程度の text 要素 (吹き出し + ナレ + SFX 合算) が manga として読みやすい目安。"
     )
     parts.append(
-        "コマ番号 (`[Panel N / ...]`) やサイズ指示は **指示文の見出しであり、"
-        "画面に文字として描かないこと**。コマ内に「1」「2」のような番号ラベルを"
-        "置かない。"
+        "コマ番号・サイズ指示などのメタ情報は指示文の見出しであり、画面に文字として描かないこと。"
     )
 
     prompt = "\n".join(parts)
@@ -238,14 +213,13 @@ def build_page_prompt(
                 message=(
                     f"PageRender prompt is {n} chars, exceeds "
                     f"image.max_prompt_chars={config.image.max_prompt_chars} "
-                    f"(page_number={page_beat.page_number}). "
-                    "Shorten PageBeat panels, lower image.max_*_summary_chars, "
-                    "or raise image.max_prompt_chars."
+                    f"(page_number={page_outline.page_number}). "
+                    "Lower image.max_*_summary_chars or raise max_prompt_chars."
                 ),
                 detail={
                     "chars": n,
                     "limit": config.image.max_prompt_chars,
-                    "page_number": page_beat.page_number,
+                    "page_number": page_outline.page_number,
                 },
             )
         )
@@ -253,7 +227,7 @@ def build_page_prompt(
         logger.warning(
             "page_render_prompt_large",
             chars=n,
-            page_number=page_beat.page_number,
+            page_number=page_outline.page_number,
             warn_limit=config.image.warn_prompt_chars,
         )
 

@@ -12,6 +12,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
+from mangaka.domain import Page
 from mangaka.persistence import latest_state_path, load_state, save_state, state_path_for
 from mangaka.result import Failure
 
@@ -20,22 +21,30 @@ def main() -> int:
     run_dir = Path(sys.argv[1])
     latest = latest_state_path(run_dir).unwrap()
     state = load_state(latest).unwrap()
-    if state.pages is None:
-        print("no pages in state", file=sys.stderr)
+    if state.page_plan is None:
+        print("state has no page_plan — nothing to reconcile", file=sys.stderr)
         return 1
 
-    updated = []
-    for p in state.pages:
-        if p.beat is None:
-            updated.append(p)
-            continue
-        png = run_dir / "pages" / f"page_{p.beat.page_number:03d}.png"
+    # Build the page list from page_plan (page_render normally does this on
+    # entry; we mirror that so the script works even before page_render has
+    # ever been run).
+    existing_by_number = {p.page_number: p for p in state.pages}
+    updated: list[Page] = []
+    for outline in state.page_plan.page_outline:
+        png = run_dir / "pages" / f"page_{outline.page_number:03d}.png"
         if not png.exists():
             print(f"missing: {png}", file=sys.stderr)
-            updated.append(p)
+            existing = existing_by_number.get(outline.page_number)
+            updated.append(
+                existing or Page(page_number=outline.page_number, image_path=None)
+            )
             continue
-        updated.append(replace(p, image_path=png))
-        print(f"i page {p.beat.page_number}: image_path = {png}")
+        existing = existing_by_number.get(outline.page_number)
+        if existing is not None:
+            updated.append(replace(existing, image_path=png))
+        else:
+            updated.append(Page(page_number=outline.page_number, image_path=png))
+        print(f"i page {outline.page_number}: image_path = {png}")
 
     new_state = replace(state, pages=updated)
     out = state_path_for(run_dir, "page_render")

@@ -10,13 +10,13 @@ from _helpers import make_test_config
 from returns.result import Failure, Success
 
 from mangaka.domain import (
-    SFX,
+    MPBV,
+    ArcPhase,
     Character,
     Location,
     MangaState,
-    PageBeat,
-    Panel,
-    SpeechIntent,
+    PageOutline,
+    PagePlan,
     Stylist,
 )
 from mangaka.errors import ErrorKind
@@ -44,13 +44,50 @@ _STYLE_GUIDE = textwrap.dedent(
     """
 )
 
+_MPBV_TEXT = textwrap.dedent(
+    """\
+    ## 1. 基本情報 (Basic Information)
+    * ログライン: 静かな決意の物語。
+    * コアテーマ: 自分の選択を信じる。
+    * 異常性: 屋上に見える景色だけが時間ごとに違って見える。
+
+    ## 2. 世界観の概要 (World Setting Summary)
+    * 舞台: 高校の屋上。
+    * 重要なルール: 朝に立てた決意は夕方には鈍くなる。
+    """
+)
+
 
 def _state(tmp_path: Path) -> MangaState:
     style_ref = tmp_path / "style.png"
     style_ref.write_bytes(b"x")
+    page_plan = PagePlan(
+        total_pages=2,
+        arc=[
+            ArcPhase(phase="起", start_page=1, end_page=1, summary="アリスの決意"),
+            ArcPhase(phase="承", start_page=2, end_page=2, summary="ボブの登場"),
+        ],
+        page_outline=[
+            PageOutline(
+                page_number=1,
+                phase="起",
+                summary="アリスが屋上で街を見下ろし、今日こそと静かに決意する",
+                character_ids=["alice", "bob"],
+                location_id="rooftop",
+            ),
+            PageOutline(
+                page_number=2,
+                phase="承",
+                summary="ボブが現れて声をかける",
+                character_ids=["alice", "bob"],
+                location_id="rooftop",
+            ),
+        ],
+    )
     return MangaState(
         seed_input="s",
         run_name="r",
+        mpbv=MPBV(raw_markdown=_MPBV_TEXT),
         stylist=Stylist(raw_markdown=_STYLE_GUIDE, style_ref_path=style_ref),
         characters=[
             Character(
@@ -90,52 +127,14 @@ def _state(tmp_path: Path) -> MangaState:
                 sheet_path=tmp_path / "rooftop.png",
             ),
         ],
+        page_plan=page_plan,
     )
 
 
-def _beat(page_number: int = 1, character_ids: list[str] | None = None) -> PageBeat:
-    return PageBeat(
-        page_number=page_number,
-        phase="起",
-        location_id="rooftop",
-        character_ids=character_ids or ["alice", "bob"],
-        mood="静かな緊張",
-        continuity_note="前ページから時間連続",
-        panels=[
-            Panel(
-                panel_no=1,
-                size_hint="large",
-                visual="アリスが街を見下ろす",
-                emotion="決意",
-                camera="ミドルショット",
-                speech_intents=[
-                    SpeechIntent(
-                        speaker_id="alice",
-                        bubble_type="inner_monologue",
-                        text="やる、絶対に。",
-                        register="静か",
-                    ),
-                ],
-                sfx=[SFX(text="ヒュウ", role="風")],
-            ),
-            Panel(
-                panel_no=2,
-                size_hint="regular",
-                visual="ボブが現れる",
-                emotion="意外",
-                camera=None,
-                speech_intents=[
-                    SpeechIntent(
-                        speaker_id="narrator",
-                        bubble_type="narration",
-                        text="夜明け前——。",
-                        register=None,
-                    ),
-                ],
-                sfx=[],
-            ),
-        ],
-        md_path=Path("page_beat_001.md"),
+def _outline(state: MangaState, page_number: int = 1) -> PageOutline:
+    assert state.page_plan is not None
+    return next(
+        o for o in state.page_plan.page_outline if o.page_number == page_number
     )
 
 
@@ -206,57 +205,49 @@ def test_extract_visual_summary_no_subsection_uses_whole_body() -> None:
 def test_build_page_prompt_happy_path(tmp_path: Path) -> None:
     state = _state(tmp_path)
     config = make_test_config()
-    result = build_page_prompt(state, _beat(), _refs(state), config)
+    result = build_page_prompt(state, _outline(state), _refs(state), config)
     assert isinstance(result, Success)
     prompt = result.unwrap()
-    # Spot-check expected sections.
+    # Top-level header
     assert "縦長の漫画ページ" in prompt
+    # MPBV overview (story-level context — added PoC 2026-05-24)
+    assert "【物語の全貌】" in prompt
+    assert "ログライン" in prompt
+    assert "異常性" in prompt
+    # Arc position
+    assert "【このページの位置】" in prompt
+    assert "1 ページ目" in prompt
+    assert "phase「起」" in prompt
+    # The per-page beat summary — the semantic core
+    assert "【このページの骨格】" in prompt
+    assert "アリスが屋上で街を見下ろし" in prompt
+    # Location + characters
     assert "【場所】" in prompt
-    assert "屋上" not in prompt or "明るい" in prompt  # loc summary present
+    assert "明るい" in prompt
     assert "【登場人物】" in prompt
     assert "アリス" in prompt
-    assert "【このページの空気】" in prompt
-    assert "静かな緊張" in prompt
-    assert "【コマ構成】" in prompt
-    # Panel markers no longer use `■ コマ N (size)` — gpt-image-2 was rendering
-    # the marker as a literal "1" / "2" label inside the panel.
-    assert "[Panel 1" in prompt
-    assert "[Panel 2" in prompt
-    assert "■ コマ" not in prompt
-    assert "ヒュウ" in prompt  # SFX surfaced
+    # Refs in numbered order
     assert "【参照画像の構成】" in prompt
     assert "1 枚目: スタイル参照画" in prompt
+    # Style guidance — stylist sections 4/5/6/9 only, not §10 禁止事項
     assert "【絵柄と演出】" in prompt
-    assert "【文字について】" in prompt
-    # 禁止事項 (section 10) is excluded from the page_render section set —
-    # it added noise without helping image quality during the PoC.
     assert "禁止事項" not in prompt
     assert "写実シェーディング禁止" not in prompt
-    # Page-render-side 【避けること】 was dropped at the same time.
-    assert "【避けること】" not in prompt
-
-
-def test_build_page_prompt_narrator_renders_as_japanese_label(tmp_path: Path) -> None:
-    state = _state(tmp_path)
-    config = make_test_config()
-    result = build_page_prompt(state, _beat(), _refs(state), config)
-    assert isinstance(result, Success)
-    assert "ナレーション" in result.unwrap()
+    # Craft direction handed to the model
+    assert "【あなたが決めること】" in prompt
+    assert "ナレーション枠" in prompt
+    # Text rules
+    assert "【文字について】" in prompt
 
 
 def test_build_page_prompt_fails_when_too_long(tmp_path: Path) -> None:
     state = _state(tmp_path)
     config = make_test_config()
-    # Forge a panel with absurdly long visual to blow the budget.
-    huge_visual = "あ" * 30000
-    beat = _beat()
-    beat = replace(
-        beat,
-        panels=[
-            replace(beat.panels[0], visual=huge_visual),
-        ],
-    )
-    result = build_page_prompt(state, beat, _refs(state), config)
+    # Forge a page outline with absurdly long summary to blow the budget.
+    huge_summary = "あ" * 30000
+    outline = _outline(state)
+    outline_long = replace(outline, summary=huge_summary)
+    result = build_page_prompt(state, outline_long, _refs(state), config)
     assert isinstance(result, Failure)
     err = result.failure()
     assert err.kind == ErrorKind.PROMPT_TOO_LONG
@@ -265,8 +256,19 @@ def test_build_page_prompt_fails_when_too_long(tmp_path: Path) -> None:
 
 
 def test_build_page_prompt_requires_stylist(tmp_path: Path) -> None:
-    state = MangaState(seed_input="s", run_name="r")  # no stylist
-    result = build_page_prompt(state, _beat(), [], make_test_config())
+    state = MangaState(seed_input="s", run_name="r")  # no stylist / mpbv / page_plan
+    page_plan = PagePlan(
+        total_pages=1,
+        arc=[ArcPhase(phase="起", start_page=1, end_page=1, summary="x")],
+        page_outline=[
+            PageOutline(
+                page_number=1, phase="起", summary="x",
+                character_ids=[], location_id="x",
+            )
+        ],
+    )
+    state = replace(state, page_plan=page_plan, mpbv=MPBV(raw_markdown=""))
+    result = build_page_prompt(state, page_plan.page_outline[0], [], make_test_config())
     assert isinstance(result, Failure)
     assert result.failure().kind == ErrorKind.MISSING_PREREQUISITE
 
@@ -287,14 +289,14 @@ def test_build_page_prompt_character_total_budget_truncates(tmp_path: Path) -> N
             )
         }
     )
-    result = build_page_prompt(state, _beat(), _refs(state), config)
+    result = build_page_prompt(state, _outline(state), _refs(state), config)
     assert isinstance(result, Success)
     out = result.unwrap()
     # alice is character_ids[0] (priority order) and survives within 30 chars.
     assert "アリス" in out
     # ボブ is lower priority; under the tight 30-char budget there's no room
     # for a second `- name: ...` line — the loop must have broken early.
-    char_block = out.split("【このページの空気】")[0]
+    char_block = out.split("【参照画像の構成】")[0].split("【登場人物】")[1]
     char_lines = [
         line for line in char_block.splitlines() if line.startswith("- ボブ:")
     ]

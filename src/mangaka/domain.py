@@ -109,67 +109,24 @@ class PagePlan:
 
 
 # ---------------------------------------------------------------------------
-# PageBeat / Panel (per-page directive consumed by PageRender)
+# Page (per-page image artifact)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(slots=True, frozen=True)
-class SpeechIntent:
-    """Verbatim short dialogue for a bubble.
-
-    `text` is the actual line to be drawn inside the bubble (≤ ~30 chars,
-    Japanese). The PoC found that asking the image model to "translate intent
-    into a line" produced garbled output — see `docs/PLAN.md` PoC notes —
-    so we now pass exact text and let the renderer copy it verbatim.
-    """
-
-    speaker_id: str
-    bubble_type: str
-    text: str
-    register: str | None = None
-
-
-@dataclass(slots=True, frozen=True)
-class SFX:
-    """Drawn sound effect (e.g. カタカナ onomatopoeia)."""
-
-    text: str
-    role: str
-
-
-@dataclass(slots=True, frozen=True)
-class Panel:
-    """One panel in reading order (top-right → bottom-left, 1-indexed)."""
-
-    panel_no: int
-    size_hint: str
-    visual: str
-    emotion: str
-    camera: str | None
-    speech_intents: list[SpeechIntent]
-    sfx: list[SFX]
-
-
-@dataclass(slots=True, frozen=True)
-class PageBeat:
-    """Parsed, structured per-page directive backed by a canonical .md file."""
-
-    page_number: int
-    phase: str
-    location_id: str
-    character_ids: list[str]
-    mood: str
-    continuity_note: str | None
-    panels: list[Panel]
-    md_path: Path
+#
+# Historical note (PoC 2026-05-24): there used to be a PageBeat layer between
+# PagePlan and PageRender that produced per-panel structured directives
+# (visual / camera / speech_intents / sfx) in Markdown + YAML frontmatter.
+# It was removed when PoC showed gpt-image-2 produces stronger narrative pages
+# when given the PagePlan.page_outline.summary directly. See
+# `docs/ARCHITECTURE.md` 設計の進化 for details. `Page` now only carries the
+# rendered image path; semantic data for the page lives in
+# `state.page_plan.page_outline[page_number - 1]`.
 
 
 @dataclass(slots=True, frozen=True)
 class Page:
-    """A finished page: its beat plus the rendered image path (when complete)."""
+    """A finished page — image path only; semantics live in PagePlan.page_outline."""
 
     page_number: int
-    beat: PageBeat
     image_path: Path | None
 
 
@@ -228,7 +185,6 @@ class MangaState:
 
 __all__ = [
     "MPBV",
-    "SFX",
     "ArcPhase",
     "Backstories",
     "Character",
@@ -236,10 +192,7 @@ __all__ = [
     "MangaState",
     "MasterPlot",
     "Page",
-    "PageBeat",
     "PageOutline",
     "PagePlan",
-    "Panel",
-    "SpeechIntent",
     "Stylist",
 ]

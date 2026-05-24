@@ -11,7 +11,7 @@ from _helpers import make_test_config
 from PIL import Image
 from returns.result import Failure, Success
 
-from mangaka.domain import MangaState, Page, PageBeat, Panel
+from mangaka.domain import MangaState, Page
 from mangaka.errors import ErrorKind
 from mangaka.export.pdf import export_pdf
 
@@ -21,36 +21,13 @@ def _make_png(path: Path, color: tuple[int, int, int]) -> None:
     img.save(path)
 
 
-def _beat(n: int) -> PageBeat:
-    return PageBeat(
-        page_number=n,
-        phase="起",
-        location_id="rooftop",
-        character_ids=["alice"],
-        mood="m",
-        continuity_note=None,
-        panels=[
-            Panel(
-                panel_no=1,
-                size_hint="regular",
-                visual="x",
-                emotion="y",
-                camera=None,
-                speech_intents=[],
-                sfx=[],
-            )
-        ],
-        md_path=Path(f"page_beat_{n:03d}.md"),
-    )
-
-
 def _state_with_pages(tmp_path: Path, n: int = 3) -> MangaState:
     palette = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0), (255, 0, 255)]
     pages: list[Page] = []
     for i in range(1, n + 1):
         p = tmp_path / f"page_{i:03d}.png"
         _make_png(p, palette[(i - 1) % len(palette)])
-        pages.append(Page(page_number=i, beat=_beat(i), image_path=p))
+        pages.append(Page(page_number=i, image_path=p))
     return MangaState(seed_input="s", run_name="r", pages=pages)
 
 

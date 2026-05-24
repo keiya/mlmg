@@ -17,35 +17,13 @@ from mangaka.domain import (
     Location,
     MangaState,
     Page,
-    PageBeat,
     PageOutline,
     PagePlan,
-    Panel,
-    SpeechIntent,
 )
 
 
 def _make_page(n: int) -> Page:
-    panel = Panel(
-        panel_no=1,
-        size_hint="regular",
-        visual="x",
-        emotion="calm",
-        camera=None,
-        speech_intents=[],
-        sfx=[],
-    )
-    beat = PageBeat(
-        page_number=n,
-        phase="セットアップ",
-        location_id="rooftop",
-        character_ids=["alice"],
-        mood="quiet",
-        continuity_note=None,
-        panels=[panel],
-        md_path=Path(f"runs/x/page_beats/page_beat_{n:03d}.md"),
-    )
-    return Page(page_number=n, beat=beat, image_path=None)
+    return Page(page_number=n, image_path=None)
 
 
 def test_state_lookups_are_indexed_by_id() -> None:
@@ -122,19 +100,11 @@ def test_page_plan_construction() -> None:
     assert plan.arc[0].end_page == 2
 
 
-def test_speech_intent_register_optional() -> None:
-    si = SpeechIntent(
-        speaker_id="alice",
-        bubble_type="dialogue",
-        text="やる、絶対に。",
-    )
-    assert si.register is None
-
-
 def test_frozen_dataclass_rejects_mutation() -> None:
-    si = SpeechIntent(speaker_id="alice", bubble_type="dialogue", text="x")
+    """Page is frozen — replace, not mutate."""
+    page = Page(page_number=1, image_path=None)
     with pytest.raises((AttributeError, TypeError)):
-        si.text = "y"  # type: ignore[misc]
+        page.page_number = 2  # type: ignore[misc]
 
 
 def test_replace_invalidates_cached_lookups() -> None:

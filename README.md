@@ -14,7 +14,7 @@ M1〜M4 完了。M5 (inject CLI / status / cost tracking) は未着手。
 
 ```
 Plot → Backstory → MPBV → Stylist → Character → Location
-     → PagePlan → PageBeat → PageRender → PDF
+     → PagePlan → PageRender → PDF
 ```
 
 PoC として **4 ページ短編** を 1 本完走済み（約 $5、所要 55 分）。
@@ -56,7 +56,7 @@ uv run mangaka run "コンビニ深夜バイトの高校生が、毎晩黒スー
 |---|---|
 | `seed` (positional) | 物語のシード文。1〜3 文程度の premise |
 | `-f, --seed-file PATH` | シード文をファイルから読む（positional の代替） |
-| `--until LAYER` | このレイヤーで停止 (`plot` / `backstory` / `mpbv` / `stylist` / `character` / `location` / `page_plan` / `page_beat` / `page_render`)。デフォルトは `mpbv`（text only で安全） |
+| `--until LAYER` | このレイヤーで停止 (`plot` / `backstory` / `mpbv` / `stylist` / `character` / `location` / `page_plan` / `page_render`)。デフォルトは `mpbv`（text only で安全） |
 | `--name NAME` | 出力ディレクトリ名。省略時は seed から自動派生 |
 | `--config PATH` | `config.toml` のパス。デフォルト `./config.toml` |
 | `--force` | 既存 run ディレクトリへの上書き許可（state を消去して新規スタート） |
@@ -99,7 +99,7 @@ uv run mangaka run "シード文" \
 ```
 
 ⚠️ `--force` を付けると **すべての state ファイルが削除され、テキスト層から再生成** される。  
-既に生成された `assets/` `page_beats/` `pages/` の PNG / MD ファイルは残るが、state が消えるので **コストを払って LLM 出力は作り直す** ことになる。
+既に生成された `assets/` `pages/` の PNG ファイルは残るが、state が消えるので **コストを払って LLM 出力は作り直す** ことになる。
 
 中間状態を保持したまま resume したい場合は PoC ヘルパー `tools/poc_continue.py` を使う:
 
@@ -108,7 +108,7 @@ uv run mangaka run "シード文" \
 uv run python tools/poc_continue.py runs/convenience_alien --until page_render
 ```
 
-このヘルパーは PoC 用の暫定実装。proper な resume / inject は M5 で `mangaka run --from` / `mangaka run --inject-*` として CLI 化予定 (`docs/PLAN.md` 参照)。
+このヘルパーは PoC 用の暫定実装。proper な resume / inject は今後 `mangaka run --from` / `mangaka run --inject-*` として CLI 化予定。
 
 ## 出力ディレクトリ構造
 
@@ -123,8 +123,6 @@ runs/{name}/
 │   ├── style.png                     # スタイル参照画
 │   ├── characters/{char_id}.png      # キャラ設定画
 │   └── locations/{loc_id}.png        # ロケ設定画
-├── page_beats/
-│   └── page_beat_NNN.md              # ページごとのコマ割り指示書 (Markdown + YAML)
 ├── pages/
 │   └── page_NNN.png                  # gpt-image-2 出力ページ画像
 └── manga.pdf                         # 最終 PDF (export 後)
@@ -141,7 +139,7 @@ max_arc_phases = 5            # 起承転結フェーズ数の上限
 max_panels_per_page = 8
 max_main_characters = 8
 max_locations = 6
-max_parse_retries = 2         # PageBeat / PagePlan の parse retry 回数
+max_parse_retries = 2         # PagePlan の parse retry 回数
 
 [image_provider]
 provider = "openai"
@@ -183,7 +181,7 @@ PoC 用の小規模設定例は `config_poc.toml` (max_pages=4) を参照。
 ## 既知の制約
 
 1. **日本語テキスト** はある程度まで verbatim render される (Phase 2 までの prompt engineering で大幅改善) が、長文や複雑漢字は崩れることがある。Lettering 層は v1 スコープ外（`docs/ARCHITECTURE.md §v1 スコープ外`）。
-2. **同じ施設の複数アングル** は LLM が独立 location として扱うことがある（例: 店内 / レジ前 / 外観が別ロケ）。整合が部分的に崩れる。`docs/PLAN.md` M5 で prompt 修正予定。
+2. **同じ施設の複数アングル** は LLM が独立 location として扱うことがある（例: 店内 / レジ前 / 外観が別ロケ）。整合が部分的に崩れる。location prompt で部分的に対策済み、残る制約は今後の prompt 調整で対応。
 3. **Resume / inject は未実装**。途中失敗したらヘルパー `tools/poc_continue.py` か state ファイル手動削除＋`--force` で対応。
 4. **コスト追跡は未実装**。`runs/{name}/state_*.json` のメタ情報と OpenAI Usage ダッシュボードで間接確認。
 
@@ -214,14 +212,14 @@ mangaka/
 ├── src/mangaka/
 │   ├── cli.py                # argparse エントリポイント
 │   ├── pipeline.py           # 各 layer のオーケストレーション
-│   ├── domain.py             # 不変ドメイン型 (MangaState, PageBeat, etc.)
+│   ├── domain.py             # 不変ドメイン型 (MangaState, PagePlan, Page, etc.)
 │   ├── result.py             # Result[T, MangaError]
 │   ├── config.py             # config.toml ローダ (pydantic)
 │   ├── persistence.py        # state JSON serializer
 │   ├── errors.py             # ErrorKind enum + MangaError
 │   ├── llm/                  # LLMClient Protocol / OpenAI 実装 / Fake
 │   ├── image/                # ImageClient + ref builder + page prompt builder
-│   ├── parse/                # Markdown / YAML パーサ (character, location, page_beat, page_plan)
+│   ├── parse/                # Markdown / YAML パーサ (character, location, page_plan)
 │   ├── layers/               # 各 layer の generate_X_layer 関数
 │   └── export/               # PDF 出力 (reportlab + PIL)
 ├── prompts/                  # Jinja2 テンプレート (日本語)
@@ -230,7 +228,7 @@ mangaka/
 └── docs/
     ├── ARCHITECTURE.md       # レイヤー構造・永続化・依存関係
     ├── SCHEMA.md             # 各 layer の入出力スキーマ詳細
-    └── PLAN.md               # M1〜M5 マイルストーン
+    └── (PLAN.md は撤退 — 設計の進化は ARCHITECTURE.md に集約)
 ```
 
 詳細は `CLAUDE.md` / `docs/ARCHITECTURE.md` / `docs/SCHEMA.md` を参照。

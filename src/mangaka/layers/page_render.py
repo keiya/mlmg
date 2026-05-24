@@ -1,12 +1,20 @@
-"""PageRender layer: per-page image generation.
+"""PageRender layer: per-page image generation directly from PagePlan.
 
-For each page already populated by `page_beat` layer:
-1. `build_refs(state, beat)` — order ref images (`style → loc → prev → chars`).
-2. `build_page_prompt(state, beat, refs, config)` — assemble the Japanese
-   natural-language prompt; fails with `PROMPT_TOO_LONG` if it exceeds
-   `image.max_prompt_chars`.
-3. `img.edit(prompt, refs=...)` — gpt-image-2 generates a PNG.
-4. Versioned save to `pages/page_NNN.png`; update `Page.image_path` in state.
+For each `PagePlan.page_outline[N]`:
+1. Initialize `state.pages` with one `Page` per outline (if not yet done).
+2. `build_refs(state, page_outline)` — order ref images (style → loc → chars).
+3. `build_page_prompt(state, page_outline, refs, config)` — assemble the
+   Japanese natural-language prompt (MPBV overview + arc position + page
+   outline summary + visuals + stylist + craft directives). Fails with
+   `PROMPT_TOO_LONG` if it exceeds `image.max_prompt_chars`.
+4. `img.edit(prompt, refs=...)` — gpt-image-2 generates a PNG. Panel layout,
+   camera angles, speech bubble placement, narration are decided by the model.
+5. Save to `pages/page_NNN.png`; update `Page.image_path` in state.
+
+> **Design note (PoC 2026-05-24)**: this layer used to consume `PageBeat`
+> (per-panel structured directives) but PageBeat was removed when PoC showed
+> gpt-image-2 produces stronger narrative pages when given the page_outline
+> semantics directly. See `docs/ARCHITECTURE.md` 設計の進化.
 """
 
 from __future__ import annotations
@@ -15,7 +23,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from mangaka.config import MangakaConfig
-from mangaka.domain import MangaState, Page
+from mangaka.domain import MangaState, Page, PageOutline
 from mangaka.errors import ErrorKind, MangaError
 from mangaka.image.assets import save_bytes
 from mangaka.image.client import ImageClient
@@ -32,20 +40,20 @@ logger = get_logger(__name__)
 
 def _render_one_page(
     state: MangaState,
-    page: Page,
+    page_outline: PageOutline,
     img: ImageClient,
     config: MangakaConfig,
     run_dir: Path,
-) -> Result[Page, MangaError]:
-    """Generate the image for a single page and update its `image_path`."""
+) -> Result[Path, MangaError]:
+    """Generate the image for a single page; returns the saved path."""
     labeled_refs = build_refs(
         state,
-        page.beat,
+        page_outline,
         max_refs=config.image.max_refs_per_page,
         include_prev=config.image.include_prev_page_ref,
     )
 
-    prompt_result = build_page_prompt(state, page.beat, labeled_refs, config)
+    prompt_result = build_page_prompt(state, page_outline, labeled_refs, config)
     if isinstance(prompt_result, Failure):
         return Failure(prompt_result.failure())
     prompt = prompt_result.unwrap()
@@ -61,21 +69,21 @@ def _render_one_page(
         return Failure(edit_result.failure())
 
     save_result = save_bytes(
-        run_dir / "pages" / f"page_{page.page_number:03d}.png",
+        run_dir / "pages" / f"page_{page_outline.page_number:03d}.png",
         edit_result.unwrap(),
     )
     if isinstance(save_result, Failure):
         return Failure(save_result.failure())
 
-    new_page = replace(page, image_path=save_result.unwrap())
+    saved_path = save_result.unwrap()
     logger.info(
         "page_render_completed",
-        page_number=page.page_number,
-        image_path=str(new_page.image_path),
+        page_number=page_outline.page_number,
+        image_path=str(saved_path),
         prompt_chars=len(prompt),
         ref_count=len(labeled_refs),
     )
-    return Success(new_page)
+    return Success(saved_path)
 
 
 def generate_page_render_layer(
@@ -87,15 +95,15 @@ def generate_page_render_layer(
     *,
     run_dir: Path,
 ) -> Result[MangaState, MangaError]:
+    """Render every page in `state.page_plan.page_outline` not yet rendered."""
     _ = (llm, prompt_loader)  # silence ruff/pyright unused-arg without ARG suppressions
-    """Render every page in `state.pages` that doesn't yet have an image_path."""
     logger.info("layer_started", layer="page_render")
 
-    if not state.pages:
+    if state.page_plan is None:
         return Failure(
             MangaError(
                 kind=ErrorKind.MISSING_PREREQUISITE,
-                message="page_render requires PageBeat layer first (state.pages is empty)",
+                message="page_render requires PagePlan layer first",
             )
         )
     if state.stylist is None:
@@ -106,35 +114,46 @@ def generate_page_render_layer(
             )
         )
 
-    # Persist per-page progress: each successful render is checkpointed before
-    # the next attempt, so a mid-loop failure doesn't discard already-paid
-    # renders. A resume re-reads this state and skips pages whose `image_path`
-    # is already set — preventing duplicate paid image calls and orphan PNGs
-    # for the rendered tail.
+    # Initialize state.pages from page_plan.page_outline if empty. This is the
+    # first place that needs concrete Page objects (page_plan only stores
+    # outlines). Existing pages with image_path are preserved (resume support).
+    existing_by_number = {p.page_number: p for p in state.pages}
+    initialized: list[Page] = []
+    for outline in state.page_plan.page_outline:
+        existing = existing_by_number.get(outline.page_number)
+        if existing is not None:
+            initialized.append(existing)
+        else:
+            initialized.append(Page(page_number=outline.page_number, image_path=None))
+    current = replace(state, pages=initialized)
+
+    # Per-page checkpoint so a mid-loop failure doesn't discard paid renders.
     checkpoint_path = state_path_for(run_dir, "page_render")
 
-    # Render in numeric page-number order regardless of storage order. With
-    # `include_prev_page_ref=True`, page N depends on page N-1's `image_path`;
-    # if state.pages got reordered (e.g. by a future inject CLI), iterating
-    # in storage order could render page 3 before page 2 and miss the prev ref.
-    page_order = sorted(
-        range(len(state.pages)), key=lambda idx: state.pages[idx].page_number
+    # Render in page-number order (the outline list is already in order but
+    # be defensive in case of an injected page_plan edit).
+    outlines_sorted = sorted(
+        state.page_plan.page_outline, key=lambda o: o.page_number
     )
 
-    current = state
-    for i in page_order:
-        page = current.pages[i]
+    for outline in outlines_sorted:
+        # Locate the page in current.pages (kept in step with outline order).
+        idx = next(
+            i for i, p in enumerate(current.pages)
+            if p.page_number == outline.page_number
+        )
+        page = current.pages[idx]
         if page.image_path is not None:
-            continue  # already rendered (e.g. partial resume)
-        page_result = _render_one_page(current, page, img, config, run_dir)
-        if isinstance(page_result, Failure):
-            return Failure(page_result.failure())
+            continue  # already rendered (partial resume)
+
+        render_result = _render_one_page(current, outline, img, config, run_dir)
+        if isinstance(render_result, Failure):
+            return Failure(render_result.failure())
+
         new_pages = [*current.pages]
-        new_pages[i] = page_result.unwrap()
+        new_pages[idx] = replace(page, image_path=render_result.unwrap())
         current = replace(current, pages=new_pages)
 
-        # Checkpoint immediately. If this fails, surface the IO error rather
-        # than continuing — a stale state file would mislead a later resume.
         save_result = save_state(current, checkpoint_path)
         if isinstance(save_result, Failure):
             return Failure(save_result.failure())

@@ -13,15 +13,16 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from typing import cast
 
 from dotenv import load_dotenv
 
 from mangaka.config import RetryConfig, load_config
 from mangaka.domain import MangaState
+from mangaka.errors import MangaError
 from mangaka.image.client_openai import OpenAIImageClient
 from mangaka.layers.character import generate_character_layer
 from mangaka.layers.location import generate_location_layer
-from mangaka.layers.page_beat import generate_page_beat_layer
 from mangaka.layers.page_plan import generate_page_plan
 from mangaka.layers.page_render import generate_page_render_layer
 from mangaka.layers.stylist import generate_stylist_layer
@@ -39,7 +40,6 @@ _REMAINING_LAYERS = [
     ("character", "character", generate_character_layer),
     ("location", "location", generate_location_layer),
     ("page_plan", "page_plan", generate_page_plan),
-    ("page_beat", "page_beat", generate_page_beat_layer),
     ("page_render", "page_render", generate_page_render_layer),
 ]
 
@@ -54,11 +54,11 @@ def _state_has(state: MangaState, layer_key: str) -> bool:
             return len(state.locations) > 0
         case "page_plan":
             return state.page_plan is not None
-        case "page_beat":
-            return state.pages is not None and any(p.beat is not None for p in state.pages)
         case "page_render":
-            return state.pages is not None and all(
-                p.image_path is not None for p in state.pages
+            return (
+                state.page_plan is not None
+                and len(state.pages) >= state.page_plan.total_pages
+                and all(p.image_path is not None for p in state.pages)
             )
         case _:
             return False
@@ -133,14 +133,19 @@ def main() -> int:
             print(f"i skipping {name} (already in state)")
             continue
         print(f"i running {name}")
-        if name in ("stylist", "character", "location", "page_beat", "page_render"):
-            step_result = fn(state, llm, img, config, loader, run_dir=args.run_dir)  # type: ignore[call-arg]
+        # Dispatch through two signatures (text-only vs image-bearing); types
+        # converge to Result[MangaState, MangaError]. pyright can't infer that
+        # from the call-site branch.
+        if name in ("stylist", "character", "location", "page_render"):
+            step_result: object = fn(state, llm, img, config, loader, run_dir=args.run_dir)  # type: ignore[call-arg]
         else:
             step_result = fn(state, llm, config, loader)  # type: ignore[call-arg]
         if isinstance(step_result, Failure):
-            print(f"✗ {name} failed: {step_result.failure().message}", file=sys.stderr)
+            err = cast("MangaError", step_result.failure())  # type: ignore[attr-defined]
+            print(f"✗ {name} failed: {err.message}", file=sys.stderr)
             return 1
-        state = step_result.unwrap()
+        new_state = cast("MangaState", step_result.unwrap())  # type: ignore[attr-defined]
+        state = new_state
         save_path = state_path_for(args.run_dir, state_key)
         save_result = save_state(state, save_path)
         if isinstance(save_result, Failure):

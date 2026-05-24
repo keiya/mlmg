@@ -246,7 +246,7 @@ def _run_subcommand(args: argparse.Namespace) -> int:
         return 1
     # On --force, clear EVERY old state_*.json so later layers cannot accept
     # a stale higher-numbered snapshot as the "latest" for this run. The
-    # canonical artifacts (assets/, page_beats/, pages/) stay on disk — those
+    # canonical artifacts (assets/, pages/) stay on disk — those
     # are immutable per ARCH and will be re-versioned when overwritten.
     for stale in existing_state_files:
         try:

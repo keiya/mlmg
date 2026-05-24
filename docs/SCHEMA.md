@@ -15,11 +15,10 @@
 | Plot, Backstory, MPBV | Markdown | 自由記述、人間レビュー可能 |
 | Stylist | Markdown | 絵柄ガイド、自由記述 |
 | Character, Location | Markdown | テキスト中心、人間レビュー可能 |
-| PagePlan | JSON | 数値・ID 中心 (`total_pages`, `arc[]`, `page_outline[]`)、構造化処理 |
-| **PageBeat** | **Markdown + YAML frontmatter** | 日本語自由記述が中心 (visual, speech text, sfx)、ID 部分のみ構造化 |
-| PageRender | 画像 (PNG) | gpt-image-2 出力 |
+| PagePlan | JSON | 数値・ID 中心 (`total_pages`, `arc[]`, `page_outline[]`)、構造化処理。**PageRender 層の意味論ソース** |
+| PageRender | 画像 (PNG) | gpt-image-2 出力。コマ割り・吹き出し・ナレ・SFX はモデル判断 |
 
-**PageBeat だけ「両方の良いとこ取り」**: ID と数値は frontmatter で堅く、日本語の演出記述は Markdown で柔らかく。
+> **歴史**: 過去は PagePlan と PageRender の間に PageBeat 層 (Markdown + YAML frontmatter で panel 単位の構造化指示) を挟んでいたが、PoC で撤退。`docs/ARCHITECTURE.md` の「設計の進化」節参照。
 
 ### キー言語と値言語
 
@@ -58,7 +57,7 @@
   - 日本語名のみ: romaji slug (`山田太郎` → `yamada_taro`)
   - 同名の脇役が複数: 役割 suffix (`yamada_father`, `yamada_son`)
 - 予約 ID:
-  - `narrator` — **Character として登録は禁止**だが、PageBeat の Speech 行の `speaker_id` ではナレーション擬似話者として**使用可**。Character 層には登場しない特殊話者
+  - `narrator` — **Character として登録は禁止**。gpt-image-2 が PageRender でナレーション枠の話者ラベルとして使う特殊予約語。Character 層には登場しない
   - `self`, `none`, `null` — 全用途で使用禁止
 - 一度確定したら**変更不可**（アセット ファイル名・state JSON で参照されるため）
 
@@ -76,7 +75,7 @@ LLM プロンプト側で「最初のキャラクター層出力時に ID を確
 ### 検証ルール
 
 - `MangaState` 内で character_id / location_id の集合は一意であること
-- PageBeat の `character_ids` / `location_id` は、必ず Character / Location 層で定義済みの ID を参照すること
+- PagePlan の `page_outline[*].character_ids` / `location_id` は、必ず Character / Location 層で定義済みの ID を参照すること
 - 未定義 ID 参照は parse error として LLM に再生成を依頼
 
 ---
@@ -91,7 +90,7 @@ mlsg2 の Stylist (文体) と mangaka の絵柄ガイドを **1 つの層に統
 
 #### 必須セクション (10 個)
 
-**Narrative sections (1〜3)**: PageBeat 生成時に使う。物語のトーン・テンポ・セリフ感を定める。
+**Narrative sections (1〜3)**: PageRender prompt の構成材料として使う。物語のトーン・テンポ・セリフ感を定める。
 
 ```markdown
 # Style Guide
@@ -104,7 +103,7 @@ mlsg2 の Stylist (文体) と mangaka の絵柄ガイドを **1 つの層に統
 
 ## 3. セリフとモノローグの傾向
 （軽口 vs 重い対話、ナレーション枠の多さ、心の声の比重、口調全体の指針。
-本文の傾向（軽口 vs 重い、丁寧 vs 砕け）と、ナレーション枠 / 心の声 / 通常会話の使い分け指針を書く。PageBeat 層がこれを踏まえて **短い verbatim セリフ** を生成する）
+本文の傾向（軽口 vs 重い、丁寧 vs 砕け）と、ナレーション枠 / 心の声 / 通常会話の使い分け指針を書く。PageRender 層がこれを踏まえて gpt-image-2 に**セリフ・ナレーション枠の使い方を委ねる**）
 ```
 
 **Visual sections (4〜9)**: style_ref / Character sheet / Location sheet / PageRender が用途に応じてサブセットを使う。
@@ -147,8 +146,7 @@ LLM プロンプト側で「上記 10 セクションをすべて埋めること
 | `generate_style_ref`（style.png 生成） | 4, 5, 6, **10** |
 | `generate_character_sheet`（キャラ設定画） | 4, 5, 6, **7**, **10** |
 | `generate_location_sheet`（ロケ設定画） | 4, 5, 6, **8**, **10** |
-| `generate_page_beat`（PageBeat の LLM 生成） | **1, 2, 3**, 9, **10** |
-| `build_page_prompt`（PageRender prompt 組み立て） | 4, 5, 6, 9, **10** |
+| `build_page_prompt`（PageRender prompt 組み立て） | 4, 5, 6, 9 |
 
 `10. 禁止事項` は universal（全プロンプトで使う）。
 
@@ -158,8 +156,7 @@ SECTION_SETS = {
     "style_ref":       [4, 5, 6, 10],
     "character_sheet": [4, 5, 6, 7, 10],
     "location_sheet":  [4, 5, 6, 8, 10],
-    "page_beat":       [1, 2, 3, 9, 10],
-    "page_render":     [4, 5, 6, 9, 10],
+    "page_render":     [4, 5, 6, 9],   # §10 禁止事項は PoC で削除
 }
 
 def extract_sections(stylist_md: str, section_nos: list[int]) -> str:
@@ -316,7 +313,7 @@ Stylist の text を元に gpt-image-2 で参照画像を 1 枚生成。`assets/
 
 ## 6. PagePlan
 
-PagePlan は **JSON** で持つ。20 ページ規模の短編漫画には章 (Chapter) 概念が重すぎるため、**1 作品 = 1 PagePlan = ページ配分表**として持つ。Timeline も短編では redundant (PageBeat 生成時に直前 1〜2 ページの Markdown を context で読めば連続性は保てる) なので、v1 では PagePlan に統合・吸収する。
+PagePlan は **JSON** で持つ。20 ページ規模の短編漫画には章 (Chapter) 概念が重すぎるため、**1 作品 = 1 PagePlan = ページ配分表**として持つ。Timeline も短編では redundant (PageRender 時に MPBV §1+§2 + page_outline summary で連続性は保てる) なので、v1 では PagePlan に統合・吸収する。
 
 ### 永続化
 
@@ -399,7 +396,7 @@ PagePlan は 1 作品で 1 個。state ファイル名は `runs/{name}/state_07_
 |---|---|:-:|---|
 | `page_number` | int | ✓ | 全話通算 (1 始まり) |
 | `phase` | str | ✓ | 紐づく `arc[*].phase` の値 |
-| `summary` | str | ✓ | このページで起きることの 1 文要約 (PageBeat 生成のシード) |
+| `summary` | str | ✓ | このページで起きることの 1-2 文記述。**PageRender 時に gpt-image-2 へ意味論として直接渡される**ため、key dialogue は引用形式で書くと verbatim 採用されやすい |
 | `character_ids` | list[str] | ✓ | このページに登場するキャラ ID |
 | `location_id` | str | ✓ | このページのメインロケ |
 
@@ -418,7 +415,7 @@ PagePlan は 1 作品で 1 個。state ファイル名は `runs/{name}/state_07_
 
 mlsg2 の TimelineSlice 構造 (キャラ別の時系列イベント) は v1 mangaka では**実装しない**。理由:
 
-- 20 ページ短編なら、PageBeat 生成時に直前 1〜2 ページの Markdown を context で渡せば連続性は維持できる
+- 20 ページ短編なら、PageRender 時に MPBV §1+§2 と page_outline summary だけで連続性は維持できる
 - 衣装替え・怪我・持ち物などの continuity を細かく追う必要は短編にはほぼない
 - レイヤーを 1 つ減らせる
 
@@ -426,443 +423,36 @@ mlsg2 の TimelineSlice 構造 (キャラ別の時系列イベント) は v1 man
 
 ---
 
-## 7. PageBeat
+## 7. PageRender Prompt
 
-PageBeat はページ単位の「何を描くか」の指示書。**Markdown + YAML frontmatter** で書く。
+`src/mangaka/image/prompts.py:build_page_prompt` で動的合成する **日本語自然言語プロンプト** 1 本。`PagePlan.page_outline[N]` を意味論の起点として、gpt-image-2 に**コマ割り・カメラアングル・吹き出し配置・narration の使い方**を委任する。
 
-### 永続化
+> **設計変更 (PoC 2026-05-24)**: 以前は PageBeat (Markdown + YAML frontmatter, per-panel 構造化指示) を介する設計だったが、PoC で比較した結果、PagePlan の意味論を直接 gpt-image-2 に渡す方が物語性が伝わる画になると判明し、PageBeat 層を撤退した。詳細は `docs/ARCHITECTURE.md` の「設計の進化」節を参照。
 
-PageBeat は **2 つのアセット**として保存される:
+### prompt の構成セクション
 
-- `runs/{name}/page_beats/page_beat_NNN.md` — canonical な Markdown ファイル（人間レビュー対象、直接上書きはしない）
-- `runs/{name}/state_08_page_beat_NN.json` — parsed 構造 + md_path 参照（state JSON は path と要約のみ持つ）
+1. **冒頭の指示**: 「縦長の漫画ページを 1 枚描いてください。右上から左下の読み順、日本の漫画スタイル。」
+2. **【物語の全貌】**: MPBV §1 (logline / コアテーマ / 異常性) + §2 (世界ルール) を `extract_sections([1, 2])` で抽出
+3. **【このページの位置】**: 全 N ページ中 M ページ目、phase「{arc.phase}」({arc.summary})
+4. **【このページの骨格】**: `page_outline.summary` (1-2 文の beat 記述)。**意味論の核**で、gpt-image-2 はここからコマ割り・narration・dialogue を再構築する
+5. **【場所】**: `location.description` から 視覚的特徴 セクションを `extract_visual_summary` で要約 (上限 `image.max_location_summary_chars`)
+6. **【登場人物】**: `page_outline.character_ids` 順に各キャラの 外見 サブセクションを要約 (per-char / 合計の上限あり)
+7. **【参照画像の構成】**: `Ref Builder` の出力を「N 枚目: {label}」形式で番号付き列挙 (single source of truth)
+8. **【絵柄と演出】**: `extract_sections(stylist, SECTION_SETS["page_render"])` で stylist の visual + コマ運び方針セクションを抽出
+9. **【あなたが決めること】**: コマ数 (5-8 推奨)・カメラ・セリフ/心の声/ナレ枠の使い分け・SFX を gpt-image-2 判断に委ねる旨を明示
+10. **【文字について】**: セリフ verbatim 描画 / 吹き出しは話者の口元から / 長さ目安 (dialogue ≤30 字, narration ≤60 字)
 
-state JSON の例:
-```json
-{
-  "page_number": 5,
-  "phase": "対立",
-  "location_id": "rooftop_morning",
-  "character_ids": ["alice", "bob"],
-  "mood": "緊迫から再会へ",
-  "panels": [/* パース済み Panel 構造 */],
-  "md_path": "page_beats/page_beat_005.md"
-}
-```
+### サイズガード
 
-編集ワークフロー:
-1. PageBeat 層が `.md` を生成 → parse → state JSON 保存
-2. ユーザーは `page_beats/page_beat_NNN.md` をコピーして編集（canonical file は上書きしない）
-3. `--inject-page-beat 5=path/to/edited.md` で再パースし、`page_beats/page_beat_NNN_vNNN.md` のような新パスに保存する
-4. `state_08_page_beat_NN.json` の `md_path` を新パスへ更新
-5. `state_09_page_NN.json` を削除 + `state_final.json` を削除（stale `image_path` 拾い防止）
-6. pipeline 再走 → 該当ページの PageRender だけ実行、新 `pages/page_NNN_vNNN.png` に保存
+`config.image.max_prompt_chars` (デフォルト 20000) を超えると `PROMPT_TOO_LONG` で `Failure` を返す。`warn_prompt_chars` (デフォルト 12000) を超えると warning ログだけ出す。実測では `[物語の全貌]` 込みで 4000-6500 chars 程度に収まる。
 
-これは ARCHITECTURE.md の「アセット永続化レイアウト」と「`--inject-*` の挙動」と整合する（画像と同じく path 参照モデル、すべて versioned）。
+### 参照画像の使い方
 
-### ファイル形式
-
-```markdown
----
-page_number: 5
-phase: 対立
-location_id: rooftop_morning
-character_ids: [alice, bob]
-mood: 緊迫から再会へ
-continuity_note: 前ページから時間連続、朝日が差してきた
----
-
-## Panel 1 [size: regular]
-
-**Visual**: アリスが屋上の柵を握りしめ、街を見下ろしている。風で髪が揺れる。
-
-**Camera**: ミドルショット、背後から
-**Emotion**: 決意
-
-**Speech**:
-- [alice / inner_monologue / 静か] 今日こそ、ちゃんと言う。
-
-**SFX**:
-- ヒュウ (風)
-
-## Panel 2 [size: large]
-
-**Visual**: ボブが屋上のドアを開ける。逆光で表情は影になっている。
-
-**Camera**: アリス視点の正面・煽り
-**Emotion**: 不意の登場
-
-**Speech**:
-- [bob / dialogue / 落ち着いた] アリス。
-
-**SFX**:
-- ガチャ (ドアが開く音)
-
-## Panel 3 [size: regular]
-
-**Visual**: アリスが振り返り、目を見開く。
-
-**Camera**: バストアップ、正面
-**Emotion**: 驚きと動揺
-
-**Speech**:
-- [alice / dialogue / 震え] ボ……ボブ、なんでここに。
-
-**SFX**: なし
-```
-
-### Frontmatter スキーマ
-
-| フィールド | 型 | 必須 | 説明 |
-|---|---|:-:|---|
-| `page_number` | int | ✓ | 全話通算のページ番号 (1 始まり) |
-| `phase` | str | ✓ | PagePlan の `arc[*].phase` の値。任意文字列 (例: "セットアップ" / "対立" / "クライマックス" / "結末") |
-| `location_id` | str | ✓ | このページのロケーション。Location 層で定義済みであること |
-| `character_ids` | list[str] | ✓ | このページに登場するキャラ ID。Character 層で定義済み |
-| `mood` | str | ✓ | ページ全体の感情トーン |
-| `continuity_note` | str \| null | ✗ | 前ページとの繋ぎ・時間・状況の説明 |
-
-`character_ids` の順序は「主要度順」とみなす。Ref Builder が ref 予算を超える場合、末尾から削る。
-
-### Panel セクション
-
-#### ヘッダ形式
-
-```
-## Panel {N} [size: {SIZE_VALUE}]
-```
-
-- `N`: 1 始まりの読み順 (右上 → 左下)
-- `SIZE_VALUE`: `regular` | `large` | `wide`
-
-#### サイズ enum
-
-| 値 | 意味 |
-|---|---|
-| `regular` | 標準サイズのコマ。1 ページに 4〜6 個入る想定 |
-| `large` | キメゴマ。ページの 1/3〜1/2 を占める |
-| `wide` | 横長のコマ。ページ幅いっぱい、高さは半分以下 |
-
-`wide` は v1 で 1 ページ内に収まる横長コマで、見開きは含まない（見開きは v1 スコープ外）。
-
-#### 必須フィールド
-
-| フィールド | 型 | 必須 | 説明 |
-|---|---|:-:|---|
-| `Visual` | 自由テキスト | ✓ | コマの絵的描写。1〜3 文、目安 80〜220 字 (8 コマ上限と合わせて 1 ページ分が肥大化しないように) |
-| `Camera` | 自由テキスト | ✗ | アングル・寄り引き（例: ミドルショット、ローアングル） |
-| `Emotion` | 自由テキスト | ✓ | コマの感情トーン |
-| `Speech` | list 形式 | ✗ | 発話・モノローグ・ナレーション。詳細下記 |
-| `SFX` | list 形式 \| `なし` | ✗ | 効果音・擬音 |
-
-#### Speech 行のフォーマット
-
-```
-- [{speaker_id} / {bubble_type} / {register}] {text}
-```
-
-- `speaker_id`: Character 層で定義済みの ID、または `narrator`（ナレーション）
-- `bubble_type`: enum (下記)
-- `register`: 口調のトーン（自由テキスト、例: 「怒り」「震え」「無感情」「ささやき」）
-- `text`: **吹き出しに描画される実セリフ文字列**。短く口語的に、30 文字以内。`"..."` や `「...」` で囲んでも可（parser が strip する）
-- Speech 数に上限なし。コマの感情密度に応じて自由。`narration` は場面説明・時間経過・心情の exposition に使い、`dialogue` / `inner_monologue` と budget を分けて運用する
-
-> **設計変更（PoC 2026-05-24）**: 当初は `intent`（意味記述）を渡して画像モデルにセリフを翻訳させる設計だったが、PoC で「意味記述まで律儀に画に書く」「短いセリフは正確に書ける」と分かったので **`text`（verbatim 短セリフ）方式に切り替えた**。詳細は `docs/PLAN.md` PoC ノート参照。
-
-```
-Speech がない panel:
-**Speech**: なし
-```
-
-#### bubble_type enum
-
-| 値 | 意味 |
-|---|---|
-| `dialogue` | 通常の会話バルーン |
-| `inner_monologue` | 心の声・モノローグ（雲形・角バルーン） |
-| `narration` | ナレーション枠（四角枠） |
-| `shout` | 叫び・絶叫（爆発型・尖ったバルーン） |
-
-LLM はこの enum 値を使って書く。gpt-image-2 が漫画知識でバルーン形状を描き分ける。
-
-#### SFX 行のフォーマット
-
-```
-- {text} ({role})
-```
-
-- `text`: 実際に描かれる擬音（カタカナ・ひらがな等）
-- `role`: 何の音か（自由テキスト）
-
-SFX が無い panel:
-```
-**SFX**: なし
-```
-
-### パース挙動
-
-パースとバリデーションは**2 フェーズ**に分かれる。「読み取りは tolerant、レンダー可能性判定は strict」。
-
-#### Phase 1: パース (tolerant、極力保持)
-
-- frontmatter は YAML としてパース。frontmatter 自体が malformed なら即 parse error
-- Panel セクションは `## Panel N` ヘッダで分割
-- **各 Panel の構造はベストエフォートで抽出**: 必須フィールドが欠落していてもとりあえずパースは通す（None / 欠落マーカーを入れて保持）
-- Speech / SFX の行フォーマット違反は warning、その行だけスキップ
-- panel 番号の歯抜けは warning として記録（例: Panel 1, Panel 3 がある時 Panel 2 欠如）
-
-#### Phase 2: バリデーション (strict、レンダー前の関門)
-
-PageRender 実行前に、パース結果を以下の基準でチェック:
-
-- **frontmatter 必須フィールド** (`page_number`, `phase`, `location_id`, `character_ids`, `mood`) が揃っているか
-- **各 Panel の必須フィールド** (`Visual`, `Emotion`) が揃っているか
-- `character_ids` / `location_id` が Character / Location 層で定義済みの ID を参照しているか
-- `speaker_id` が **定義済み Character ID または予約 ID `narrator`** であること（それ以外は失敗）
-- `bubble_type` が enum 値（`dialogue` / `inner_monologue` / `narration` / `shout`）のいずれかであること
-- panel 番号の歯抜けがないか（1 始まり連番）
-
-**いずれかに違反 → validation 失敗**。`max_parse_retries` 回まで LLM に「以下の問題を修正して再出力」と依頼してリトライ。**panel スキップせず、必ず修正版を要求**。
-
-理由: 漫画は 1 ページ中のコマ欠けが視覚的に致命的。tolerant parse の対象は「format violation の救済」（例: `**Visual**:` の前後の空白、`-` と `−` の混在）であって、欠落フィールドの救済ではない。
-
-### 完全例（Panel 構造のフルセット）
-
-```markdown
----
-page_number: 8
-phase: クライマックス
-location_id: cafe_evening
-character_ids: [alice, bob, mio]
-mood: 三人の緊張がほどける
-continuity_note: 前ページの言い争いの直後。沈黙の余韻
----
-
-## Panel 1 [size: large]
-
-**Visual**: アリスとボブがテーブルを挟んで向かい合い、ミオが少し離れた席で本を読んでいる。窓の外は夕暮れ。
-
-**Camera**: 俯瞰、店内全体が見える広い構図
-**Emotion**: 気まずい静寂
-
-**Speech**:
-- [narrator / narration / 静か] 言い争いから、もう一時間。
-
-**SFX**:
-- カチ……コチ (時計の音)
-
-## Panel 2 [size: regular]
-
-**Visual**: アリスがカップを両手で包んで俯いている。
-
-**Camera**: バストアップ、正面
-**Emotion**: 内省
-
-**Speech**: なし
-
-**SFX**: なし
-
-## Panel 3 [size: regular]
-
-**Visual**: ボブが意を決して顔を上げる。
-
-**Camera**: バストアップ、正面
-**Emotion**: 決意
-
-**Speech**:
-- [bob / dialogue / 静か] アリス、あのさ……。
-
-**SFX**: なし
-
-## Panel 4 [size: regular]
-
-**Visual**: アリスがハッと顔を上げる。視線がぶつかる。
-
-**Camera**: アリスの目元アップ
-**Emotion**: 戸惑いと期待
-
-**Speech**: なし
-
-**SFX**:
-- ドキ (心音)
-
-## Panel 5 [size: regular]
-
-**Visual**: ミオがちらりと二人を見て、本を閉じて静かに席を立つ。
-
-**Camera**: ミオの背中越し、二人が遠くに見える
-**Emotion**: 気遣い、退場の予感
-
-**Speech**:
-- [mio / inner_monologue / 優しい] ここは、いない方がいい。
-
-**SFX**:
-- スッ (本を閉じる)
-```
+`Ref Builder` (§8) が組み立てた `labeled_refs` を **prompt 中の「N 枚目」の番号と一致させる** ことで、モデルが ref を取り違えないようにする。詳細は §8 参照。
 
 ---
 
-## 8. PageRender Prompt
-
-PageBeat (Markdown + frontmatter) を gpt-image-2 に投げる**日本語自然言語プロンプト 1 本**に変換する。
-
-### プロンプト組み立てアルゴリズム
-
-```python
-def build_page_prompt(
-    state,
-    page_beat,
-    labeled_refs: list[LabeledRef],   # 呼び出し側 (generate_page_render) で 1 回だけ計算して渡す
-    config: MangakaConfig,            # image.max_* 系の上限値を参照する
-) -> Result[str, MangaError]:
-    parts = []
-
-    # 1. ページ全体の指示
-    # 出力サイズ・アスペクト比は ImageClient.edit() の size パラメータで制御。
-    # プロンプトには書かない（モデルは出力サイズを決められないため）。
-    parts.append("縦長の漫画ページを 1 枚描いてください。")
-    parts.append("右上から左下の読み順、日本の漫画スタイル。")
-    parts.append("")
-
-    # 2. ロケーション
-    loc = state.locations_by_id[page_beat.location_id]
-    parts.append("【場所】")
-    parts.append(extract_visual_summary(
-        loc.description, max_chars=config.image.max_location_summary_chars))  # 視覚的特徴セクションを要約、上限あり
-    parts.append("")
-
-    # 3. 登場人物 (合計上限を厳守、超えたら末尾の脇役から削る)
-    parts.append("【登場人物】")
-    char_lines: list[str] = []
-    used_chars = 0
-    per_char_max = config.image.max_character_summary_chars
-    total_max = config.image.max_character_summary_total_chars
-    for char_id in page_beat.character_ids:   # character_ids 順 = 主要度順
-        char = state.characters_by_id[char_id]
-        summary = extract_visual_summary(char.description, max_chars=per_char_max)
-        line = f"- {char.name}: {summary}"
-        if used_chars + len(line) > total_max:
-            break   # 合計超過、ここで打ち切り (Ref Builder と同じドロップ順)
-        char_lines.append(line)
-        used_chars += len(line)
-    parts.extend(char_lines)
-    parts.append("")
-
-    # 4. ページ全体のムード
-    parts.append("【このページの空気】")
-    parts.append(page_beat.mood)
-    if page_beat.continuity_note:
-        parts.append(page_beat.continuity_note)
-    parts.append("")
-
-    # 5. コマ構成
-    parts.append(f"【コマ構成】{len(page_beat.panels)} コマで構成。右上から左下の読み順:")
-    parts.append("")
-    for panel in page_beat.panels:
-        parts.append(f"■ コマ {panel.panel_no} ({size_label(panel.size_hint)})")
-        parts.append(f"  絵: {panel.visual}")
-        if panel.camera:
-            parts.append(f"  カメラ: {panel.camera}")
-        parts.append(f"  感情: {panel.emotion}")
-        for sp in panel.speech_intents:
-            parts.append(f"  セリフ: {speaker_label(state, sp.speaker_id)} が{bubble_label(sp.bubble_type)}で発話 "
-                         f"(口調: {sp.register})。文字:「{sp.text}」")
-        for fx in panel.sfx:
-            parts.append(f"  効果音: 「{fx.text}」（{fx.role}）")
-        parts.append("")
-
-    # 6. 参照画像の番号付き解説
-    #    labeled_refs (Ref Builder の戻り値) を直接 iterate するので、
-    #    label と実 refs の順序ズレが起きない (single source of truth)
-    parts.append("【参照画像の構成】")
-    for idx, ref in enumerate(labeled_refs, start=1):
-        parts.append(f"- {idx} 枚目: {ref.label}")
-    parts.append("")
-
-    # 7. スタイル指示（visual + コマ演出 + 禁止事項のセクションのみ）
-    parts.append("【絵柄と演出】")
-    parts.append("参照画像のスタイル参照画の絵柄に従ってください。")
-    parts.append(extract_sections(state.stylist.raw_markdown, SECTION_SETS["page_render"]))
-    parts.append("")
-
-    # 7. 文字について（重要な割り切り）
-    parts.append("【文字について】")
-    parts.append("吹き出し・ナレーション枠・効果音文字は、漫画として自然な"
-                 "「雰囲気のある日本語」で描いてください。")
-    parts.append("正確な文章の再現は不要です。"
-                 "発話の意図と感情が伝わるような言葉を選んでください。")
-    parts.append("読みやすさより、表情・構図・コマ割りのテンポを優先してください。")
-    parts.append("")
-
-    # 8. 禁止事項
-    parts.append("【避けること】")
-    parts.append("- 正確な文章再現にこだわって絵の質を落とすこと")
-    parts.append("- コマ割りの読み順を破ること")
-    parts.append("- 写実すぎる影付けや 3D っぽいレンダリング")
-
-    prompt = "\n".join(parts)
-
-    # 9. 長さガード (gpt-image-2 の prompt 上限 32,000 chars に対する安全マージン)
-    n = len(prompt)
-    if n > config.image.max_prompt_chars:
-        return Failure(MangaError(
-            kind=ErrorKind.PROMPT_TOO_LONG,
-            message=f"PageRender prompt が {n} chars で上限 {config.image.max_prompt_chars} を超過。"
-                    f"page_number={page_beat.page_number}。"
-                    f"PageBeat の panel 長を縮める / config の summary 上限を絞る / max_prompt_chars 自体を見直すなど、上位での対処が必要",
-        ))
-    if n > config.image.warn_prompt_chars:
-        logger.warning("page_render_prompt_large",
-                       chars=n, page_number=page_beat.page_number,
-                       warn_limit=config.image.warn_prompt_chars)
-    return Success(prompt)
-```
-
-補助関数:
-
-```python
-def size_label(s: str) -> str:
-    return {"regular": "標準サイズ", "large": "キメゴマ・大ゴマ",
-            "wide": "横長の広いコマ"}[s]
-
-def bubble_label(b: str) -> str:
-    return {
-        "dialogue": "通常の吹き出し",
-        "inner_monologue": "心の声（雲形か角バルーン）",
-        "narration": "ナレーション枠（四角枠）",
-        "shout": "叫びの吹き出し（爆発型）",
-    }[b]
-
-def speaker_label(state, speaker_id: str) -> str:
-    if speaker_id == "narrator":
-        return "ナレーション"
-    return state.characters_by_id[speaker_id].name  # 名前で参照
-```
-
-### 参照画像 (refs) の添付
-
-プロンプト本体とは別に、Ref Builder (§9) が組み立てた画像群を `ImageClient.edit()` に渡す。`build_refs()` は **`generate_page_render` で 1 回だけ呼ぶ**。`build_page_prompt()` には引数で渡し、`ImageClient.edit()` には path のみ抽出して渡す:
-
-```python
-def generate_page_render(state, page_beat, img, config):
-    labeled_refs = build_refs(
-        state, page_beat,
-        max_refs=config.image.max_refs_per_page,
-        include_prev=config.image.include_prev_page_ref,
-    )
-    return build_page_prompt(state, page_beat, labeled_refs, config).bind(
-        lambda prompt: img.edit(
-            prompt=prompt,
-            refs=[r.path for r in labeled_refs],
-        )
-    )
-```
-
-`LabeledRef` が prompt と refs の両方の **single source of truth**。プロンプト中の「N 枚目」と `refs[N-1]` が必ず一致する。順序ズレで gpt-image-2 が ref を取り違える事故を防ぐ設計。
-
----
-
-## 9. Ref Builder
+## 8. Ref Builder
 
 `src/mangaka/image/ref_builder.py` の優先度ロジック。
 
@@ -899,10 +489,10 @@ class LabeledRef:
 ```python
 def build_refs(
     state,
-    page_beat,
+    page_outline,  # PagePlan.page_outline[N]
     *,
     max_refs: int,
-    include_prev: bool,  # config default flipped to False after 2026-05-24 PoC
+    include_prev: bool,  # config default False after 2026-05-24 PoC
 ) -> list[LabeledRef]:
     refs: list[LabeledRef] = []
 
@@ -913,15 +503,14 @@ def build_refs(
     ))
 
     # 2. ロケ sheet を予約
-    loc = state.locations_by_id[page_beat.location_id]
+    loc = state.locations_by_id[page_outline.location_id]
     refs.append(LabeledRef(
         path=loc.sheet_path,
         label=f"場所「{loc.name}」の設定画",
     ))
 
-    # 3. 直前ページを page_number - 1 で ID ルックアップ。
-    #    state.pages[-1] では --inject-page-beat 時に間違ったページを引きかねない
-    prev_page = state.pages_by_number.get(page_beat.page_number - 1)
+    # 3. 直前ページ (default OFF, opt-in only for stylistic carryover)
+    prev_page = state.pages_by_number.get(page_outline.page_number - 1)
     if include_prev and prev_page and prev_page.image_path:
         refs.append(LabeledRef(
             path=prev_page.image_path,
@@ -931,7 +520,7 @@ def build_refs(
     # 4. キャラ sheets を char.sheet_paths 単位で展開、残り budget で truncate
     char_budget = max(0, max_refs - len(refs))
     char_refs: list[LabeledRef] = []
-    for char_id in page_beat.character_ids:
+    for char_id in page_outline.character_ids:
         char = state.characters_by_id[char_id]
         for sheet_path in char.sheet_paths:
             char_refs.append(LabeledRef(
@@ -976,7 +565,7 @@ def build_refs(
 
 ---
 
-## 10. 残る議論
+## 9. 残る議論
 
 スキーマレベルは固まったが、実装時に詰めるべき細部:
 

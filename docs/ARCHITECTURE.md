@@ -46,8 +46,7 @@ mlsg2 と共通:
 | Character (text) | **Character (text + 設定画), Stylist の後** |
 | ─ | **Location (新規, text + 設定画), Stylist の後** |
 | Chapter / Timeline | **削除し `PagePlan` に統合**（20 ページ短編に章概念は不要、Timeline も pre-page context で代替できる） |
-| Scene (散文) | **PageBeat (Markdown + YAML frontmatter, verbatim 短セリフ ≤30 字)** |
-| ─ | **PageRender (新規, gpt-image-2 で 1 ページ 1 画像)** |
+| Scene (散文) | **PageRender (gpt-image-2 で 1 ページ 1 画像、PagePlan.page_outline を直接 consume)** |
 | Export (HTML/PDF 小説) | **Export (PDF 漫画, A5 portrait 148×210mm, RTL)** |
 
 **画像が要る層は 4 か所のみ:** Stylist (1 枚) / Character (N 枚) / Location (M 枚) / PageRender (P 枚)。
@@ -98,19 +97,13 @@ User Input (seed)
    └─────────────────────────────┘
               │
               ▼ (per page)
-   ┌─────────────────────────────────────┐
-   │ 8. PageBeat (Markdown + YAML × P)   │
-   │   visual + speech text ≤30字 + sfx   │
-   │   (前 1-2 ページの PageBeat も参照)  │
-   └─────────────────────────────────────┘
-              │
-              ▼ (per page)
-   ┌─────────────────────────────────────┐
-   │ 9. PageRender (gpt-image-2)         │
-   │    refs: style + chars + location   │
-   │         + 直前ページ                │
-   │    image × P (文字込み)             │
-   └─────────────────────────────────────┘
+   ┌─────────────────────────────────────────┐
+   │ 8. PageRender (gpt-image-2)             │
+   │    入力: PagePlan.page_outline[n] +    │
+   │          MPBV §1+§2 + stylist + 場所・  │
+   │          キャラ設定画                   │
+   │    出力: ページ画像 (文字込み, 1 枚 × P)│
+   └─────────────────────────────────────────┘
               │
               ▼
         Final PDF (A5, 148×210mm, RTL)
@@ -127,8 +120,9 @@ User Input (seed)
 | Character | mpbv + stylist | list[Character] | 各キャラ設定画 (N 枚) | 1.0 | OFF |
 | Location | mpbv + stylist | list[Location] | 各舞台設定画 (M 枚) | 0.9 | OFF |
 | PagePlan | mpbv + chars + locs | PagePlan (JSON, `arc` + `page_outline`) | ─ | 0.7 | **ON** |
-| PageBeat | **stylist (narrative)** + page_plan + page_outline[n] + previous_page_beats[-2:] | list[PageBeat] (Markdown + YAML frontmatter) | ─ | 0.7 | OFF |
-| PageRender | PageBeat + ref images | ─ | ページ画像 (1 枚) | ─ | (gpt-image-2) |
+| PageRender | page_outline[n] + MPBV §1+§2 + stylist + ref images | ─ | ページ画像 (1 枚) | ─ | (gpt-image-2) |
+
+> **PageBeat layer 撤退 (PoC 2026-05-24)**: 当初は PagePlan と PageRender の間に PageBeat 層 (panel 単位の visual / camera / speech / sfx 構造化指示) を挟む設計だった。PoC で比較検証した結果、gpt-image-2 に **PagePlan.page_outline.summary を意味論の塊として直接渡す** 方が、コマ割り・カメラ・narration 配置を model 内蔵の manga 知識で自発的に決めてくれて、結果として **物語性が読者に伝わる**画になると判明したため撤退。詳細は本ドキュメント末尾「設計の進化」節を参照。
 
 ### イメージ生成サブステップの位置づけ
 
@@ -166,25 +160,20 @@ v1 では **PageRender がページ画像にセリフ含む全要素を生成す
 - Lettering 層を別に持つコストが高い: 空バルーン検出・座標推定・縦書き日本語フォント配置・改行ルール…別プロジェクト規模の作業
 - 文字が多少崩れても許容範囲。完成原稿としての可読性より、絵柄・表情・コマ割り・テンポを優先
 
-### PageBeat は短い verbatim セリフを持つ
+### セリフは gpt-image-2 に直接書かせる
 
-PageBeat は **コマ単位の演出指示書** で、Speech 行に **吹き出しに描画される短い verbatim セリフ** (≤30 字) を含む:
+PageRender prompt に MPBV §1+§2 + PagePlan の page_outline (1-2 文の beat summary) を渡すと、gpt-image-2 は **吹き出し・ナレーション枠・効果音文字を自発的に決めて描画する**。必要な key dialogue が page_outline.summary 内に引用形式で書かれていれば、モデルがそれを verbatim で吹き出しに採用する。
 
-- `text`: 「本日も大気圧は安定していますか」など、画像に書かれる実セリフ
-- `register`: 「怒り」「震え」「無感情」など口調のトーン（プロンプトに併記）
-- `emotion`: コマ全体の感情
-- 1 panel あたり Speech 上限 2 個（dialogue / inner_monologue / narration 合算）
-
-> **設計変更（PoC 2026-05-24）**: 当初は `speech_intent`（意味記述）だけを持って画像モデルにセリフ翻訳させる設計だった。しかし PoC で gpt-image-2 は意味記述を verbatim でコピーするか半端に翻訳して破綻させると判明したため、**verbatim セリフ方式**に切り替えた。詳細は `docs/SCHEMA.md` PageBeat 節および `docs/PLAN.md` PoC ノートを参照。
+短い JP テキストの描画精度は十分実用的 (PoC 2026-05-24 確認)。文字精度より絵柄・表情・コマ割り・テンポ優先のゴール (「ちょいおもろい」) に合致。
 
 ### 将来の Lettering 移行余地
 
-PoC 2026-05-24 で `SpeechIntent.text` (verbatim 短セリフ) 方式に切り替えたことで「セリフはそこそこ正確に画像内に描かれる」状態になった。さらに高精度を求めるなら:
+さらに高精度を求めるなら:
 - PageRender prompt を「文字は空バルーンで」モードに切替
-- PageRender の後に Lettering 層を挿入 (PIL/Pillow で吹き出し検出 → 既存の `SpeechIntent.text` をフォント込みで合成)
+- PageRender の後に Lettering 層を挿入 (PIL/Pillow で吹き出し検出 → PagePlan.page_outline と MPBV から抽出した dialogue をフォント込みで合成)
 - 縦書き日本語フォント・吹き出し座標推定・改行は別プロジェクト規模
 
-各層は `MangaState → Result[MangaState, MangaError]` の純粋関数なので、間に層を挟むのはアーキ的に自由。**`SpeechIntent.text` がそのまま Lettering 入力になるので追加 schema は不要**。
+各層は `MangaState → Result[MangaState, MangaError]` の純粋関数なので、間に層を挟むのはアーキ的に自由。
 
 ---
 
@@ -263,52 +252,12 @@ class PageOutline:
 @dataclass(slots=True)
 class Page:
     page_number: int          # 全話通算 (1 始まり)
-    beat: PageBeat            # パース済み PageBeat（md_path 経由で原本にもアクセス可）
     image_path: Path | None   # PageRender 完了後にセット
-
-
-@dataclass(slots=True)
-class PageBeat:
-    page_number: int          # 全話通算 (1 始まり)
-    phase: str                # PagePlan の arc.phase ラベル (任意の文字列、参照用)
-    location_id: str          # ref 組み立てに使う
-    character_ids: list[str]  # 同上、主要度順
-    mood: str
-    continuity_note: str | None
-    panels: list[Panel]       # パース済み構造
-    md_path: Path             # 元の .md ファイル (canonical, page_beats/ 配下)
-
-
-@dataclass(slots=True)
-class Panel:
-    panel_no: int                       # 読み順 (右上 → 左下、1 始まり)
-    size_hint: str                      # "regular" | "large" | "wide"
-    visual: str                         # コマの絵的描写
-    emotion: str
-    camera: str | None                  # アングル・寄り引き
-    speech_intents: list[SpeechIntent]
-    sfx: list[SFX]
-
-
-@dataclass(slots=True)
-class SpeechIntent:
-    speaker_id: str            # Character ID または予約 ID "narrator"
-    bubble_type: str           # "dialogue" | "inner_monologue" | "narration" | "shout"
-    text: str                  # 吹き出しに描画される短い verbatim セリフ (≤ 30 字)
-    register: str | None       # 口調のトーン（怒り、震え、無感情、等）
-    # 注: PoC 2026-05-24 で `intent` (意味記述) → `text` (verbatim 短セリフ) に
-    # 変更。詳細は docs/SCHEMA.md PageBeat 節を参照。
-
-
-@dataclass(slots=True)
-class SFX:
-    text: str                  # 実際に描く擬音 (カタカナ等)
-    role: str                  # 何の音か (rain, impact, footstep, etc.)
+    # 注: 旧 v0 設計では `beat: PageBeat` を持っていたが、PageBeat 層撤退と共に削除。
+    # ページの意味論は `state.page_plan.page_outline[page_number-1]` から引く。
 ```
 
 `MangaState` 上の `T | None` は「そのレイヤーがまだ実行されていない」という進捗表現に限る。外部 I/O の失敗や参照 ID の未発見は `None` で返さず、`Failure(MangaError)` に正規化する。各レイヤーは必要な前段 state を入口で検証し、欠けていれば typed error を返す。
-
-PageBeat の panel スキーマ詳細（バルーン種別、SFX、カメラ等）は `docs/SCHEMA.md` を真とする。
 
 ---
 
@@ -394,10 +343,7 @@ runs/{name}/
 ├── state_05_character.json
 ├── state_06_location.json
 ├── state_07_page_plan.json      # PagePlan (単数、1 作品 1 個)
-├── state_08_page_beat_01.json   # parsed summary + md_path (per page)
-├── ...
-├── state_09_page_01.json        # PageRender 完了後 (image_path 入り)
-├── ...
+├── state_09_page_render.json    # PageRender 完了後 (各 Page.image_path 入り、per-page checkpoint で逐次更新)
 ├── state_final.json
 │
 ├── assets/                      # 不変アセット (上書き禁止、inject は versioned 保存)
@@ -410,12 +356,6 @@ runs/{name}/
 │       ├── classroom.png
 │       └── rooftop.png
 │
-├── page_beats/                  # PageBeat の canonical Markdown (上書き禁止、inject は versioned 保存)
-│   ├── page_beat_001.md
-│   ├── page_beat_002.md
-│   ├── page_beat_002_v002.md    #   inject 後に増える
-│   └── ...
-│
 ├── pages/                       # 最終ページ画像 (上書き禁止、inject 時は versioned 保存)
 │   ├── page_001.png
 │   ├── page_002.png
@@ -427,10 +367,10 @@ runs/{name}/
 
 ### アセットの扱い
 
-**Immutable な canonical artifacts**: `assets/`、`page_beats/`、`pages/` すべて上書きしない:
+**Immutable な canonical artifacts**: `assets/`、`pages/` すべて上書きしない:
 
-- **Pipeline は既存ファイルを上書きしない**: 通常の生成パイプラインは、一度作ったファイルを変更しない（変更すると以降のページでキャラ・コマ割り・絵がブレるため）
-- **`--inject-*` は versioned path で保存**: `assets/characters/alice_v002.png`、`page_beats/page_beat_005_v002.md`、`pages/page_005_v002.png` のような新パスに保存して state の参照先を更新する。既存ファイルは disk に残る
+- **Pipeline は既存ファイルを上書きしない**: 通常の生成パイプラインは、一度作ったファイルを変更しない（変更すると以降のページでキャラ・絵がブレるため）
+- **`--inject-*` は versioned path で保存**: `assets/characters/alice_v002.png`、`pages/page_005_v002.png` のような新パスに保存して state の参照先を更新する。既存ファイルは disk に残る
 - リテイクしたい場合は、対応する `state_*.json` を削除して再生成する。既存ファイルが残っている場合は次の空き versioned filename に保存
 - 旧版は run 内に残す。不要になった旧版の pruning は v2 候補
 
@@ -457,10 +397,10 @@ runs/{name}/
 ```
 Stylist text (visual sections)
     ├─→ Character text ─┐
-    └─→ Location text ──┴─→ PagePlan → PageBeat → PageRender
+    └─→ Location text ──┴─→ PagePlan → PageRender
 
-Stylist text (narrative sections 1-3)
-    └─→ PageBeat (LLM 生成時に直接読む)
+Stylist text (narrative sections 1-3 + 4-6, 9)
+    └─→ PageRender (LLM/画像生成時に直接読む)
 ```
 
 **画像経路** (sheets が変わると PageRender の ref が変わる):
@@ -481,16 +421,15 @@ Stylist style_ref → Character sheet 生成 → Character sheet
 
 | 差し替えるアセット | 無効化される後続 |
 |---|---|
-| **Stylist (text)** | Character/Location の text + sheets, PagePlan, PageBeat, PageRender **全部** |
+| **Stylist (text)** | Character/Location の text + sheets, PagePlan, PageRender **全部** |
 | **Stylist (style_ref 画像のみ)** | Character/Location の sheets, PageRender 全部（text は維持） |
-| Character (text) | PagePlan, 該当キャラ登場の PageBeat, PageRender |
+| Character (text) | PagePlan, 該当キャラ登場の PageRender |
 | Character (sheet 画像のみ) | 該当キャラ登場の PageRender のみ |
-| Location (text) | PagePlan, 該当ロケ登場の PageBeat, PageRender |
+| Location (text) | PagePlan, 該当ロケ登場の PageRender |
 | Location (sheet 画像のみ) | 該当ロケ登場の PageRender のみ |
-| PagePlan | 全 PageBeat, 全 PageRender |
-| PageBeat | 該当ページの PageRender |
+| PagePlan | 全 PageRender |
 
-text を差し替えると PagePlan の入力 (`mpbv + chars + locs`) が変わるため、PagePlan/PageBeat まで論理的に無効になる。**画像のみの差し替え**なら PageRender だけが影響を受ける。
+text を差し替えると PagePlan の入力 (`mpbv + chars + locs`) が変わるため、PagePlan まで論理的に無効になる。**画像のみの差し替え**なら PageRender だけが影響を受ける。
 
 `--inject-*` CLI コマンドは**該当する波及無効化を内部で実行**する（次節）。state ファイルを直接 `rm` するのは低レベル復旧用。
 
@@ -517,7 +456,7 @@ text を差し替えると PagePlan の入力 (`mpbv + chars + locs`) が変わ�
 ```bash
 # style 差し替え（手動 invalidation 経路）
 # Stylist の text を変えると Character/Location text + sheets,
-# PagePlan, PageBeat, PageRender が全部論理的に無効になる。
+# PagePlan, PageRender が全部論理的に無効になる。
 # 該当 state ファイルとアセットを全削除して再生成する。
 rm -f runs/my_manga/state_04_stylist.json
 rm -f runs/my_manga/state_0[5-9]_*.json
@@ -583,7 +522,6 @@ def export_pdf(state: MangaState, output_path: Path) -> Result[Path, MangaError]
 ## 読み方向 (RTL) の扱い
 
 - **PageRender prompt**: 「日本のマンガ、右上から左下の読み順」を**明示的に書く**。`gpt-image-2` は manga 知識から多くの場合 RTL を出すが、公式 docs が composition control の限界を認めているので、prompt 側で読み順を毎回宣言する方が堅い
-- **PageBeat の panel 配列**: 「読み順」で並べる（右上 → 左下）
 - **PDF export**: `/ViewerPreferences << /Direction /R2L >>` を明示
 
 LTR (英訳輸出) サポートは v1 では入れない。将来必要になったら上記 3 か所に flag を入れる。
@@ -627,7 +565,7 @@ LLM 層 (GPT) も日本語で動かす。mlsg2 が Claude/GPT を切り替え可
 
 PagePlan 層は `total_pages` と `page_outline[]` (1 件/ページ) でページ数を明示する。これにより:
 
-- PageBeat 層の完了条件が「`is_final_scene` flag」ではなく **「`page_outline` 配列を全部消化したら終了」** という明確な数値ベースになる
+- PageRender 層の完了条件が「`is_final_scene` flag」ではなく **「`page_outline` 配列を全部消化したら終了」** という明確な数値ベースになる
 - ページ欠けを早期検出できる（生成完了時に `total_pages == len(pages) == len(page_outline)` を assert）
 - 全体のページ数を `max_pages` 制約に収めやすい（PagePlan 層が制約内で割り振る）
 - 各ページが属する `arc.phase` も outline 経由で取得可能
@@ -674,7 +612,6 @@ mangaka run "seed" --until stylist     # スタイル参照画まで
 mangaka run "seed" --until character          # キャラ設定画まで
 mangaka run "seed" --until location           # ロケ設定画まで
 mangaka run "seed" --until page_plan
-mangaka run "seed" --until page_beat
 mangaka run "seed" --until page_render        # 全ページ画像生成（フル実行）
 
 # 再開
@@ -689,7 +626,7 @@ mangaka export runs/my_manga/ -o my_manga.pdf
 
 ### 外部注入 (Human-in-the-Loop)
 
-mlsg2 と同じパターン。MPBV / Stylist / Character / Location / PagePlan / PageBeat のレビュー差し込みをサポート:
+mlsg2 と同じパターン。MPBV / Stylist / Character / Location / PagePlan のレビュー差し込みをサポート:
 
 ```bash
 mangaka run --from runs/my_manga/ --inject-mpbv reviewed_mpbv.md
@@ -697,8 +634,9 @@ mangaka run --from runs/my_manga/ --inject-stylist style.md
 mangaka run --from runs/my_manga/ --inject-character-sheet alice=alice_v2.png
 mangaka run --from runs/my_manga/ --inject-location-sheet rooftop=rooftop_v2.png
 mangaka run --from runs/my_manga/ --inject-page-plan page_plan.json
-mangaka run --from runs/my_manga/ --inject-page-beat 5=page_beat_005.md
 ```
+
+> ページ単位の差し込みは現状の設計には無い。ページごとのリテイクは `--inject-page-plan` で page_outline.summary を編集して該当ページの再生成、または該当ページの `state_09` を rm して `--from` で resume する。
 
 **`--inject-*` の挙動 (v1 仕様)**:
 
@@ -715,8 +653,7 @@ inject コマンドは「アセットを差し替える + 論理的に無効化�
 | `--inject-stylist` | `state_04` を差し替え、新しい `style_ref` を versioned path に生成、Stylist 以降の後続 state を全削除 + `state_final.json` 削除 → 全再生成 |
 | `--inject-character-sheet alice=path` | 入力画像を `assets/characters/alice_vNNN.png` に保存、`state_05` の `sheet_paths` を更新、alice 登場ページの `state_09_page_NN.json` を削除 + `state_final.json` 削除 → PageRender 該当ページのみ再生成 (新 `pages/page_NNN_vNNN.png`) |
 | `--inject-location-sheet rooftop=path` | 入力画像を `assets/locations/rooftop_vNNN.png` に保存、`state_06` の `sheet_path` を更新、該当ロケ登場ページの `state_09_page_NN.json` を削除 + `state_final.json` 削除 → PageRender 該当ページのみ再生成 |
-| `--inject-page-plan path` | `state_07_page_plan.json` を差し替え、全 PageBeat / PageRender state を削除 + `state_final.json` 削除 → 全ページ再生成 |
-| `--inject-page-beat N=path` | `page_beats/page_beat_NNN_vNNN.md` に保存、`state_08_page_beat_NN.json` を更新、`state_09_page_NN.json` を削除 + `state_final.json` 削除 → 該当ページの PageRender だけ再走（新 versioned `pages/page_NNN_vNNN.png`） |
+| `--inject-page-plan path` | `state_07_page_plan.json` を差し替え、全 PageRender state を削除 + `state_final.json` 削除 → 全ページ再生成 |
 
 これにより通常操作はユーザーが波及無効化を意識せずに済む。低レベル復旧（手動 invalidation）が必要な場合のみ state ファイルを直接 `rm` する。`state_final.json` の削除はどの inject でも必須。
 
@@ -743,9 +680,8 @@ src/mangaka/
 │   ├── stylist.py      # text + image sub-step (Character/Location より前)
 │   ├── character.py           # text + image sub-step
 │   ├── location.py            # NEW: text + image sub-step
-│   ├── page_plan.py           # NEW: arc + page_outline を出力 (旧 chapter/timeline 統合)
-│   ├── page_beat.py           # NEW: scene.py の置き換え (verbatim 短セリフ生成)
-│   └── page_render.py         # NEW: 画像生成のみ
+│   ├── page_plan.py           # arc + page_outline を出力 (旧 chapter/timeline 統合)
+│   └── page_render.py         # PagePlan.page_outline を直接 consume、画像生成のみ
 ├── llm/
 │   ├── client.py
 │   ├── prompts.py
@@ -771,8 +707,7 @@ prompts/
 ├── 06_location.md             # NEW: ロケ抽出
 ├── 06b_location_sheet.md      # NEW: ロケ設定画生成
 ├── 07_page_plan.md            # NEW: arc 起承転結 + per-page outline 生成
-├── 08_page_beat.md            # NEW: コマ/Speech (verbatim text)/SFX の Markdown+frontmatter 生成
-└── 09_page_render.md          # NEW: 1 ページ画像生成プロンプト (文字込み)
+└── (page_render の prompt はテンプレートではなく src/mangaka/image/prompts.py で動的合成)
 ```
 
 ---
@@ -882,11 +817,6 @@ max_tokens = 16000
 thinking = true                 # arc 配分・page_outline の整合性検証
 reasoning_effort = "medium"
 
-[layers.page_beat]
-model = "gpt-5.4-mini"
-temperature = 0.7
-max_tokens = 16000
-thinking = false
 ```
 
 ---
@@ -921,6 +851,55 @@ thinking = false
 3. **Ref Builder の登場順テスト**: ref を numbered で「1 枚目はスタイル、2 枚目はロケ...」と prompt で参照したとき、gpt-image-2 が順序を尊重するかの実測
 
 実装に進める状態。
+
+---
+
+## 設計の進化 (撤退したレイヤー)
+
+過去に実装したが運用検証 (PoC) で**撤退した設計**を、判断理由とともに記録する。再度同じ設計に戻りたくなった時の参照用。完全な history は `git log --grep "PageBeat"` などで辿れる。
+
+### PageBeat layer (M2-M4 で実装、PoC 2026-05-24 で撤退)
+
+**何だったか**: PagePlan と PageRender の間に挟まる、**ページごとのコマ割り構造化指示書**を生成するレイヤー。
+
+- 入力: PagePlan.page_outline[N] + MPBV + Stylist
+- 出力: `page_beats/page_beat_NNN.md` (YAML frontmatter + Markdown)
+- 内容: panel ごとに `Visual` / `Camera` / `Emotion` / `Speech` (speaker_id, bubble_type, text, register) / `SFX` を構造化
+- LLM: gpt-5.4-mini で生成、Phase 1 (tolerant parse) + Phase 2 (strict validation) でパース
+- ドメイン型: `PageBeat`, `Panel`, `SpeechIntent`, `SFX` を `domain.py` に定義
+
+**当初の動機**: 画像生成モデル (gpt-image-2) に「コマ番号・サイズ・カメラ・話者・セリフ」を明示的に指示することで、人間のネーム作家が設計するような細かい演出制御を実現する。schema を厳密にし、parser で検証することで「LLM の format drift で run 全体を壊さない」堅牢性を担保。
+
+**何が問題だったか**:
+
+1. **過剰な制御が表現を縛っていた** — gpt-image-2 は modern image model として **manga 構造の知識を内蔵**しており、コマ割り・カメラアングル・吹き出し配置を model 内部で十分に決められる。PageBeat の細分指示は、むしろ **物語の重みづけ・ナレーション・テンポ** といった manga craft 上の重要要素を画一化していた。
+
+2. **情報密度のロス** — PagePlan の `page_outline.summary` (1-2 文の rich semantic beat) が PageBeat 層で `mood` (短文) + `continuity_note` + per-panel `Visual` に **lossy 圧縮**される。重要な「ページで読者に伝えるべきこと」が page_render に届かない構造。
+
+3. **validation deadlock** — `PageBeat.character_ids ⊆ PagePlan.outline.character_ids` の strict subset 制約と panel-level speaker check の組み合わせで、LLM が cameo キャラを参照すると parse-retry が解決できない振動状態に陥る (PoC で複数回発生)。validator を緩和して回避したが、根本的には PageBeat 層の概念モデルと LLM 出力の自由度が噛み合っていなかった。
+
+4. **アーキテクチャ複雑度** — schema (4 dataclasses) / parser (2-phase YAML + Markdown) / validator / .md persistence / state JSON 拡張 / inject CLI 設計 / 5+ tests を抱えていた。「画像生成までの距離を縮める」目的に対して overengineering。
+
+**PoC 比較検証 (2026-05-24)**: vending_machine_kindness 7 ページの page 5 (時間 redo の中核シーン) を 2 通りで render:
+
+- **Path A (PageBeat 経由)**: gpt-image-2 prompt 6337 chars。panel-level 指示通りに描画されるが、抽象的な mood / continuity_note のため「page 1 の見落としを page 5 で取り返す」物語構造が画から読み取れない。narration 枠が薄い。
+- **Path B (PagePlan.page_outline 直結)**: gpt-image-2 prompt 3816 chars (40% 短い)。MPBV §1+§2 (logline / 異常性 / 世界ルール) + page_outline.summary を意味論の塊として渡し、コマ割り・カメラ・narration 配置を model に委任。結果、戸川を catch する瞬間が描かれ、ナレ枠で「同じ場所が戻る / 見落としが鮮になる / ここだ」と redo mechanic が明示され、page 1 へのコールバックが画として成立した。
+
+Path B が **prompt 短く・コスト低く・物語性が高い** という三勝。
+
+**撤退の代替策**: page_render layer が PagePlan.page_outline[N] を直接 consume する。gpt-image-2 prompt に渡す情報:
+1. 物語の全貌 (MPBV §1+§2: logline / コアテーマ / 異常性 / 世界ルール)
+2. このページの位置 (N/M、所属する arc.phase)
+3. このページの骨格 (page_outline.summary)
+4. 場所・登場キャラの visual reference
+5. 絵柄と演出 (stylist sections)
+6. 「あなたが決めること」 セクション (panel layout / camera / speech / narration / SFX をモデル判断に委任)
+
+manga craft (コマ運び / 吹き出し / ナレ枠) は gpt-image-2 の内蔵知識に任せ、PageRender 層は **意味論を整理して渡す** 役割に純化。
+
+**戻すべき条件**: もし将来「ページ単位の精緻な制御」「ネーム編集ワークフロー」が要件として戻ってきたら、PageBeat 相当を再導入する余地はある。ただし PoC データが「PageBeat なしの方が高品質」を示しているので、その時は **専用の `--scripted` mode** のような opt-in にすべき。デフォルト経路は PagePlan → PageRender のままで。
+
+**git では**: `git log --grep "PageBeat"` で 2026-05 の修正 / 撤退コミットが追える。`src/mangaka/parse/page_beat.py` 等のコードは削除済みだが、git history には残る。
 
 ---
 
