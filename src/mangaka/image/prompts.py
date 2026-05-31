@@ -119,7 +119,7 @@ def build_page_prompt(
     parts.append("")
 
     # Story-level context: without this, gpt-image-2 composes each page in
-    # isolation. MPBV §1 (logline / theme / 異常性) + §2 (world rules) gives
+    # isolation. MPBV §1 (logline / theme / フック) + §2 (world rules) gives
     # the model the whole-story context a manga assistant would have in mind.
     overview = extract_sections(state.mpbv.raw_markdown, [1, 2])
     if overview.strip():
@@ -147,9 +147,7 @@ def build_page_prompt(
 
     parts.append("【場所】")
     parts.append(
-        extract_visual_summary(
-            loc.description, max_chars=config.image.max_location_summary_chars
-        )
+        extract_visual_summary(loc.description, max_chars=config.image.max_location_summary_chars)
     )
     parts.append("")
 
@@ -162,9 +160,7 @@ def build_page_prompt(
 
     parts.append("【絵柄と演出】 (筆致・トーン・コマ運び方針)")
     parts.append("参照画像のスタイル参照画の絵柄に従ってください。")
-    parts.append(
-        extract_sections(state.stylist.raw_markdown, SECTION_SETS["page_render"])
-    )
+    parts.append(extract_sections(state.stylist.raw_markdown, SECTION_SETS["page_render"]))
     parts.append("")
 
     parts.append("【あなたが決めること】")
@@ -173,8 +169,7 @@ def build_page_prompt(
         "感情の山場には大コマ、繰り返し・テンポには標準コマを使い分け"
     )
     parts.append(
-        "- 各コマの構図・カメラアングル・キャラのポーズと表情。"
-        "上記「骨格」の感情と arc 位置を意識"
+        "- 各コマの構図・カメラアングル・キャラのポーズと表情。上記「骨格」の感情と arc 位置を意識"
     )
     parts.append(
         "- セリフ (吹き出し): 「骨格」に引用符で書かれた key dialogue は verbatim で使う。"
@@ -193,9 +188,7 @@ def build_page_prompt(
         "「セリフ」「効果音」で描く文字は、漫画として自然な日本語でそのまま正確に描いてください。"
     )
     parts.append("セリフは短く口語的に (1 セリフ 30 字以内)、ナレ枠は 60 字以内。")
-    parts.append(
-        "吹き出しは必ず話者の口元から伸ばす。発話者と聞き手の位置関係をコマの構図で明示。"
-    )
+    parts.append("吹き出しは必ず話者の口元から伸ばす。発話者と聞き手の位置関係をコマの構図で明示。")
     parts.append(
         "1 ページ全体で 8-15 個程度の text 要素 (吹き出し + ナレ + SFX 合算) が manga として読みやすい目安。"
     )
