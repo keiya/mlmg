@@ -290,3 +290,64 @@ def test_location_multiple_paren_groups_picks_last() -> None:
     assert len(locs) == 1
     assert locs[0].id == "maruhachi_interior_night"
     assert "店内" in locs[0].name
+
+
+def test_character_backtick_wrapped_id_accepted() -> None:
+    """LLMs often emit the id as markdown inline code: ``## アリス (`alice`)``.
+
+    The backticks are cosmetic; the parser strips them so an otherwise-valid
+    id doesn't fail the run.
+    """
+    md = "## アリス (`alice`)\n### 外見\nボブカット"
+    result = parse_character_markdown(md)
+    assert isinstance(result, Success)
+    chars = result.unwrap()
+    assert chars[0].id == "alice"
+    assert chars[0].name == "アリス"
+
+
+def test_location_backtick_wrapped_id_accepted() -> None:
+    """Regression guard for the konbini_comedy run.
+
+    The LLM wrapped the id in markdown inline code,
+    ``(`convenience_store`)``, which failed `_VALID_ID_RE` and crashed the
+    run at the location layer. Uses the real multi-paren header shape (a
+    descriptive fullwidth group before the id group).
+    """
+    md = (
+        "## ヨリミチマート南町店（外観＋売り場一体設定） (`convenience_store`)\n"
+        "### 視覚的特徴\n明るい蛍光灯"
+    )
+    result = parse_location_markdown(md)
+    assert isinstance(result, Success)
+    locs = result.unwrap()
+    assert locs[0].id == "convenience_store"
+
+
+def test_backtick_strip_is_tolerant_but_revalidated() -> None:
+    """Tolerant by design: stray / unbalanced / multiple backticks all resolve
+    to the clean id, because the result is still checked by `_VALID_ID_RE`.
+
+    Strictly rejecting unbalanced backticks would reintroduce the exact
+    fragility this strip removes (a run crashing on cosmetic LLM drift), with
+    no safety gain — the stripped id is re-validated below either way.
+    """
+    for header in ("## アリス (`alice)", "## アリス (alice`)", "## アリス (```alice```)"):
+        result = parse_character_markdown(f"{header}\n### 外見\nx")
+        assert isinstance(result, Success), header
+        assert result.unwrap()[0].id == "alice"
+
+
+def test_interior_backtick_still_rejected() -> None:
+    """Strip only touches the edges: an interior backtick is not a valid id
+    char, so `` (`a`b`) `` -> `a`b` still fails validation (no silent accept)."""
+    result = parse_location_markdown("## X (`a`b`)\n### 視覚的特徴\nx")
+    assert isinstance(result, Failure)
+    assert result.failure().kind == ErrorKind.PARSE_ERROR
+
+
+def test_empty_codespan_id_rejected() -> None:
+    """An empty code span `` (``) `` strips to '' and must fail, not pass."""
+    result = parse_location_markdown("## X (``)\n### 視覚的特徴\nx")
+    assert isinstance(result, Failure)
+    assert result.failure().kind == ErrorKind.PARSE_ERROR

@@ -61,7 +61,11 @@ def parse_character_markdown(md: str) -> Result[list[ParsedCharacter], MangaErro
     """
     headers: list[tuple[str, str, int]] = []  # (id, name, start_offset)
     for m in _CHAR_HEADER_RE.finditer(md):
-        headers.append((m.group("raw_id").strip(), m.group("name").strip(), m.start()))
+        # LLMs often wrap the id in markdown inline code (`alice`); strip the
+        # surrounding backticks before validation so a cosmetic habit doesn't
+        # fail an otherwise-valid id. Mirrors parse/location.py.
+        raw_id = m.group("raw_id").strip().strip("`").strip()
+        headers.append((raw_id, m.group("name").strip(), m.start()))
 
     if not headers:
         return Failure(

@@ -36,7 +36,11 @@ def parse_location_markdown(md: str) -> Result[list[ParsedLocation], MangaError]
     """Split a Location layer Markdown blob into per-location blocks."""
     headers: list[tuple[str, str, int]] = []
     for m in _LOC_HEADER_RE.finditer(md):
-        headers.append((m.group("raw_id").strip(), m.group("name").strip(), m.start()))
+        # LLMs often wrap the id in markdown inline code (`shop`); strip the
+        # surrounding backticks before validation so a cosmetic habit doesn't
+        # fail an otherwise-valid id. Mirrors parse/character.py.
+        raw_id = m.group("raw_id").strip().strip("`").strip()
+        headers.append((raw_id, m.group("name").strip(), m.start()))
 
     if not headers:
         return Failure(
